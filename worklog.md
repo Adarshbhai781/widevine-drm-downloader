@@ -26,3 +26,52 @@ Stage Summary:
 - Full guide README.md (20KB) saved at: `/home/z/my-project/pak_workspace/UNPACK/game_patch_4.5.0.21370/ShadowTrackerExtra/README.md`
 - Also included inside both zip files in /home/z/my-project/download/
 - All deliverables saved to /home/z/my-project/download/ as required.
+
+---
+Task ID: ANALYSIS
+Agent: Super Z (main)
+Task: User asked "moder ne kya code dala hai uska analis karo" - deep-dive analysis of modder's injected code.
+
+Work Log:
+- Parsed UE4 name table structure of BP_PlayerPawn.uasset (original + modded) and identified the EXACT mechanism of the AntiCheatManager padding trick:
+  - Original: length=17, name="AntiCheatManager\0"
+  - Modded:   length=42, name="AntiCheatManager" + 25 spaces + "\0"
+  - Hash preserved (0xAAD75C7E) so UE4 lookup still works, but byte-level signature changes
+- Discovered the file-size preservation trick: modder replaced 2 long property names with shorter ones to free up exactly 25 bytes for the AntiCheatManager padding:
+  - bApplyImpulseOnDamage (22) -> bHiddenInGame (14) [saved 8 bytes]
+  - bOpened_EnableInputMode8Dirs (29) -> bOwnerNoSee (12) [saved 17 bytes]
+  - Net: -8 -17 +25 = 0 bytes (file size unchanged at 250,469)
+- Analyzed BP_ShootWeaponBase.uasset (62KB NEW file) - found critical cheat strings:
+  - Aimbot: AutoAimingConfig, AutoAimingRangeConfig
+  - Infinite Ammo: bHasInfiniteClips
+  - Magic Bullet: BulletTrack, BulletTrackComponent, BulletFireSpeedDistanceCurve
+  - Recoil removal: AccessoriesHRecoilFactor, AccessoriesVRecoilFactor
+  - Network bypass: IsDedicatedServer, HasAuthority, AutonomousClientSetting
+- Analyzed BP_BattleRoyaleHUD.uasset (16KB NEW file) - found:
+  - No-spread: AddSpreadScale, SpreadMax, IsSpreadEnable, SpreadDecreaseSpeed
+  - Hitbox ESP: HitBodyDrawColor, HitHeadDrawColor, HitFeedBack, HitPerform
+  - Anti-cheat value injection: AntiCheatRandValue0 through AntiCheatRandValue6
+  - Custom crosshair: CanvasIcon2D, WeaponCrossHairIconData, IconRotate
+- Analyzed SplashScreen_BH.uexp - found LQSG_Logo branding and TeleGram @NPC_OWN signature embedded 1 time
+- Analyzed 8MB LocalizationText_en.uexp - found TeleGram @NPC_OWN signature embedded 4 times across 154,166 strings (12x larger than original LocalizationTextFixed.uexp)
+- Generated comprehensive MODDER_CODE_ANALYSIS.md (28KB) covering:
+  - 12 distinct cheat features with mechanism and source file
+  - AntiCheatManager padding trick with byte-level proof
+  - BP_PlayerPawn edits (2 flags added, 2 removed)
+  - BP_ShootWeaponBase injected cheat variables
+  - BP_BattleRoyaleHUD spread/ESP overrides
+  - SplashScreen branding analysis
+  - Localization override analysis
+  - 27 jacket file cosmetic unlock pattern
+  - 8 card collection popup hack
+  - 31 animation modifications
+  - Multi-layered cheat architecture (6 layers)
+  - Detection risk assessment
+  - File inventory summary
+
+Stage Summary:
+- Created /home/z/my-project/download/4.5.0_MODDER_CODE_ANALYSIS.md (28KB, 13 sections)
+- Also placed inside the unpacked modded folder for download
+- Re-zipped game_patch_4.5.0.21370_UNPACKED.zip with the new analysis (14MB)
+- Identified the modder's primary technique: same-size binary patching via name table slot swapping (genius-level file-size preservation)
+- Discovered 12 distinct cheat features covering aimbot, infinite ammo, magic bullet, no-recoil, wallhack, hitbox ESP, anti-cheat bypass, cosmetic unlock, card hack, animation hack, splash branding, UI text override
