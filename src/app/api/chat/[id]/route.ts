@@ -1,105 +1,118 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { executeTool, TOOLS, ToolCall } from '@/lib/agent';
+import { executeTool, TOOLS } from '@/lib/agent';
+import type { ToolCall } from '@/lib/agent';
 
-// System prompt for the AI agent
-const SYSTEM_PROMPT = `You are Z.ai Agent — an advanced AI assistant with real-time tool-calling capabilities. You can:
+// System prompt — makes the AI a true autonomous agent
+const SYSTEM_PROMPT = `You are Z.ai Agent — an advanced autonomous AI agent. You think, plan, and execute tasks just like a senior developer.
 
-1. **Web Search** — Search the internet for real-time information
-2. **Code Execution** — Run Python or JavaScript code
-3. **File Operations** — Read, write, list, and manage files
-4. **Chart Generation** — Create bar, line, pie, scatter, and area charts
-5. **Text Analysis** — Summarize, extract keywords, sentiment analysis, word count
+## YOUR CAPABILITIES
+You have REAL tools you can call to do actual work. When you need to use a tool, output a tool call in this EXACT format:
 
-When the user asks something that requires a tool, call the appropriate tool. After getting results, provide a clear, helpful response.
+TOOL_CALL:{"name":"tool_name","args":{"key":"value"}}
 
-Rules:
-- Always explain what you're doing before calling a tool
-- If code execution fails, analyze the error and suggest fixes
-- Be concise but thorough
-- Support both Hindi/Hinglish and English
-- Format code with proper syntax highlighting
-- For math problems, use code_execute tool
-- For current events, use web_search tool`;
+Available tools:
+1. **bash_execute** — Run shell commands. Args: {"command": "your bash command"}
+2. **code_execute** — Run Python/JS code. Args: {"code": "your code", "language": "python"|"javascript"}
+3. **file_operations** — Read/write/list/delete files. Args: {"action": "read"|"write"|"list"|"delete", "path": "/path", "content": "text for write"}
+4. **web_search** — Search internet. Args: {"query": "search terms"}
+5. **generate_chart** — Make SVG charts. Args: {"chartType": "bar"|"line"|"pie"|"scatter"|"area", "data": '{"labels":[],"values":[]}', "title": "Chart Title"}
+6. **text_analysis** — Analyze text. Args: {"action": "wordcount"|"keywords"|"sentiment"|"summarize", "text": "text to analyze"}
 
-// === SMART FALLBACK RESPONSE GENERATOR ===
-function generateSmartResponse(userText: string): string {
-  const lower = userText.toLowerCase();
+## IMPORTANT: TOOL CALL FORMAT
+To call a tool, put this on its OWN line:
+TOOL_CALL:{"name":"bash_execute","args":{"command":"ls -la"}}
+Then continue your response after. You can make MULTIPLE tool calls in one response. Each goes on its own line.
 
-  // Greeting patterns
-  if (/^(hi|hello|hey|namaste|namaskar|hola|yo)\b/.test(lower) || lower === 'hii' || lower === 'helo') {
-    const greetings = [
-      "Hello! 👋 I'm **Z.ai Agent** — your AI assistant with real-time tool calling capabilities. I can help you with:\n\n- 🔍 **Web Search** — Find real-time information\n- 💻 **Code Execution** — Run Python & JavaScript\n- 📁 **File Operations** — Read, write, manage files\n- 📊 **Charts** — Generate visualizations\n- 📝 **Text Analysis** — Summarize, keywords, sentiment\n\nJust ask me anything or type a message to get started!",
-      "Hey there! 👋 Welcome to **Z.ai Agent**! I'm an agentic AI that can do much more than just chat. Try asking me to:\n\n- Search the web for something\n- Execute code (Python/JS)\n- Analyze text\n- Generate charts\n- Manage files\n\nWhat would you like to do today?",
-      "Namaste! 🙏 I'm **Z.ai Agent**, your AI assistant. Main aapki kya help kar sakta hoon? I can search the web, run code, analyze files, create charts, and much more!\n\nBas batao kya karna hai! 🚀",
-    ];
-    return greetings[Math.floor(Math.random() * greetings.length)];
+## HOW YOU WORK
+1. User gives you a task
+2. Think about approach, explain briefly
+3. CALL TOOLS to do the actual work
+4. After getting results, explain what happened
+5. If there's an error, fix and retry
+
+## CODE GENERATION
+When asked to write code:
+1. Explain what you'll build
+2. Write the code
+3. Use code_execute or file_operations to save AND run it
+4. Show the output
+
+## RULES
+- ALWAYS execute code when asked — don't just write it, RUN it
+- Support Hindi/Hinglish and English equally
+- Use markdown formatting
+- Be thorough — actually complete tasks
+- Maximum 8 tool calls per turn`;
+
+// Parse TOOL_CALL: patterns from LLM response
+function parseToolCalls(text: string): { cleanText: string; toolCalls: ToolCall[] } {
+  const lines = text.split('\n');
+  const toolCalls: ToolCall[] = [];
+  const cleanLines: string[] = [];
+
+  for (const line of lines) {
+    const match = line.match(/^TOOL_CALL:(.+)$/);
+    if (match) {
+      try {
+        const parsed = JSON.parse(match[1]);
+        toolCalls.push({
+          id: `call_${Date.now()}_${toolCalls.length}`,
+          type: 'function',
+          function: {
+            name: parsed.name || parsed.tool || 'unknown',
+            arguments: JSON.stringify(parsed.args || parsed.arguments || parsed.params || {}),
+          },
+        });
+      } catch {
+        cleanLines.push(line);
+      }
+    } else {
+      cleanLines.push(line);
+    }
   }
 
-  // Code execution patterns
-  if (/\b(run|execute|compile|eval)\b.*\b(code|python|javascript|js|py|program)\b/i.test(lower) || 
-      /\b(calculate|compute|math|solve)\b/i.test(lower) ||
-      /```(?:python|javascript|js|py)/i.test(userText)) {
-    return "I'll execute that code for you! 🚀 I'm running your code now using the **code_execute** tool. You'll see the results right here.\n\nI support **Python** and **JavaScript** execution with a 15-second timeout and up to 1MB of output. Go ahead and send me your code!";
-  }
-
-  // Web search patterns
-  if (/\b(search|find|look ?up|google|latest|current|today|news|what is|who is|when|where)\b/i.test(lower)) {
-    return "Let me search for that! 🔍 I'm using the **web_search** tool to find real-time information for you. Results will appear here shortly.\n\nI can find articles, news, documentation, and more from across the web.";
-  }
-
-  // File operations
-  if (/\b(read|write|open|save|create|delete|list|file|folder|directory)\b/i.test(lower)) {
-    return "I can help with file operations! 📁 I support:\n\n- **Read** files — `read a file at path`\n- **Write** files — `write content to file`\n- **List** directory contents\n- **Delete** files\n\nTell me which file you'd like to work with!";
-  }
-
-  // Chart generation
-  if (/\b(chart|graph|plot|visuali[zs]|bar chart|pie chart|line chart|scatter)\b/i.test(lower)) {
-    return "I'll create a chart for you! 📊 I support:\n\n- **Bar Charts** — For comparisons\n- **Line Charts** — For trends\n- **Pie Charts** — For distributions\n- **Scatter Plots** — For correlations\n- **Area Charts** — For cumulative data\n\nSend me your data and I'll visualize it!";
-  }
-
-  // Text analysis
-  if (/\b(analyze|summarize|summary|keywords|sentiment|word ?count)\b/i.test(lower)) {
-    return "I'll analyze that text for you! 📝 I can:\n\n- **Summarize** — Extract key points\n- **Keywords** — Find important terms\n- **Sentiment** — Positive/negative/neutral analysis\n- **Word Count** — Character, word, sentence stats\n\nPaste your text and tell me what analysis you need!";
-  }
-
-  // Who are you
-  if (/who (are|r) (you|u)|tum (kaun|kon) ho|apna (intro|introduction)|what can you do/i.test(lower)) {
-    return "I'm **Z.ai Agent** 🤖 — an advanced AI assistant with **agentic capabilities**!\n\n### What makes me special:\n- 🛠️ **Tool Calling** — I don't just talk, I *do things*\n- 🔍 **Real-time Web Search** — Current information at your fingertips\n- 💻 **Code Execution** — I run actual Python & JavaScript\n- 📁 **File Management** — Read, write, organize files\n- 📊 **Chart Generation** — Beautiful SVG visualizations\n- 📝 **Text Analysis** — Summarize, keywords, sentiment\n\n### How I work:\n1. You ask me something\n2. I figure out which tool(s) to use\n3. I execute them in real-time\n4. I give you a clear, formatted response\n\nI'm built with **Next.js**, **TypeScript**, **Prisma**, and **Zustand**. My backend uses server-side streaming for instant responses!\n\nTry me out — ask me to search something, run code, or create a chart! 🚀";
-  }
-
-  // Thank you
-  if (/thank|thanks|dhanyavaad|shukriya|thnx/i.test(lower)) {
-    return "You're welcome! 😊 Feel free to ask me anything else. I'm here to help with searches, code, files, charts, and more! 🚀";
-  }
-
-  // Hinglish / Hindi patterns
-  if (/kya|kaise|kab|kahan|kaun|kyon|batao|bolo|samjhao|chahiye|sakta|hoga|karo|karna/i.test(lower)) {
-    return "Samajh gaya! 🙏 Main aapki help karunga. Batao kya karna hai:\n\n- 🔍 **Kuch search** karna hai?\n- 💻 **Code run** karna hai?\n- 📁 **File** ka kaam hai?\n- 📊 **Chart** banana hai?\n- 📝 **Text analyze** karna hai?\n\nBas command do! 🚀";
-  }
-
-  // Default smart response
-  return `Great question! 🤔 Let me help you with that.\n\nI'm **Z.ai Agent** — I can assist you in many ways:\n\n- **Ask me to search** something on the web\n- **Give me code** to execute (Python/JS)\n- **Ask me to analyze** text or data\n- **Request a chart** from your data\n- **Tell me about files** you need managed\n\nWhat would you like to do?`;
+  // Also check for code blocks that look like they should be executed
+  // Pattern: user asks to run code and LLM writes it in a code block
+  return {
+    cleanText: cleanLines.join('\n'),
+    toolCalls,
+  };
 }
 
-// Auto-execute tools based on user intent
-async function autoExecuteTools(userText: string): Promise<Array<{ name: string; output: string }>> {
-  const results: Array<{ name: string; output: string }> = [];
-  const lower = userText.toLowerCase();
+// Check if the response has code blocks that should be auto-executed
+function extractAutoExecuteCode(text: string, userMessage: string): ToolCall[] {
+  const toolCalls: ToolCall[] = [];
+  const lowerMsg = userMessage.toLowerCase();
 
-  // Auto word count for text analysis
-  if (/\b(count|words|characters)\b/i.test(lower) && userText.length > 20) {
-    try {
-      const result = await executeTool({
-        id: 'auto_wc',
-        name: 'text_analysis',
-        arguments: { action: 'wordcount', text: userText },
-      });
-      results.push({ name: 'text_analysis', output: result.output });
-    } catch { /* skip */ }
+  // Only auto-execute if user explicitly asked to run/execute the code
+  const shouldAutoExec = /run|execute|chalao|karo|test|try|check|dekho|compile/i.test(lowerMsg);
+  if (!shouldAutoExec) return [];
+
+  // Extract code blocks
+  const codeBlockRegex = /```(\w+)\s*\n([\s\S]*?)```/g;
+  let match;
+  while ((match = codeBlockRegex.exec(text)) !== null) {
+    const lang = match[1].toLowerCase();
+    const code = match[2].trim();
+    if (code.length > 5 && ['python', 'py', 'javascript', 'js', 'bash', 'sh', 'shell'].includes(lang)) {
+      if (['bash', 'sh', 'shell'].includes(lang)) {
+        toolCalls.push({
+          id: `auto_${Date.now()}_${toolCalls.length}`,
+          type: 'function',
+          function: { name: 'bash_execute', arguments: JSON.stringify({ command: code }) },
+        });
+      } else {
+        toolCalls.push({
+          id: `auto_${Date.now()}_${toolCalls.length}`,
+          type: 'function',
+          function: { name: 'code_execute', arguments: JSON.stringify({ code, language: lang === 'py' ? 'python' : 'javascript' }) },
+        });
+      }
+    }
   }
 
-  return results;
+  return toolCalls;
 }
 
 export async function POST(
@@ -108,9 +121,8 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const { messages: clientMessages, apiKey, model } = await request.json();
+    const { messages: clientMessages } = await request.json();
 
-    // Validate conversation exists
     const conversation = await db.conversation.findUnique({ where: { id } });
     if (!conversation) {
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
@@ -120,109 +132,148 @@ export async function POST(
     const lastUserMsg = clientMessages[clientMessages.length - 1];
     if (lastUserMsg?.role === 'user') {
       await db.message.create({
-        data: {
-          conversationId: id,
-          role: 'user',
-          content: lastUserMsg.content,
-        },
+        data: { conversationId: id, role: 'user', content: lastUserMsg.content },
       });
     }
 
-    // Build messages for LLM
-    const systemMessage = { role: 'system', content: SYSTEM_PROMPT };
-    const allMessages = [systemMessage, ...clientMessages.map((m: { role: string; content: string }) => ({
-      role: m.role,
-      content: m.content,
-    }))];
-
-    // Try to use z-ai-web-dev-sdk for LLM
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
+        let fullResponse = '';
+
         try {
-          // Attempt 1: z-ai-web-dev-sdk
-          let responseText = '';
-          let toolCallsToExecute: ToolCall[] = [];
-
+          // Init ZAI SDK - carefully handle ES module
+          let zai: any = null;
           try {
-            const { chat } = await import('z-ai-web-dev-sdk');
-            const streamResponse = await chat({
-              messages: allMessages,
-              tools: TOOLS,
-              stream: true,
-            });
+            let ZAI;
+            try {
+              ZAI = (await import('z-ai-web-dev-sdk')).default;
+            } catch (_importErr) {
+              // Dynamic import failed — SDK may not be available
+            }
+            if (ZAI && typeof ZAI.create === 'function') {
+              zai = await ZAI.create();
+            }
+          } catch (sdkErr) {
+            console.error('ZAI SDK init failed:', sdkErr);
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'content', text: 'AI backend is starting up. Please try again in a moment.' })}\n\n`));
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+            controller.close();
+            return;
+          }
 
-            // Process streamed response
-            if (streamResponse && typeof streamResponse === 'object' && Symbol.asyncIterator in (streamResponse as any)) {
-              for await (const chunk of streamResponse as AsyncIterable<any>) {
-                const text = chunk?.content || chunk?.text || chunk?.delta?.content || '';
-                if (text) {
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'content', text })}\n\n`));
-                  responseText += text;
-                }
+          // Build LLM messages
+          const llmMessages: any[] = [
+            { role: 'system', content: SYSTEM_PROMPT },
+            ...clientMessages.map((m: { role: string; content: string; toolCalls?: string; role?: string }) => ({
+              role: m.role === 'user' ? 'user' : 'assistant',
+              content: m.content,
+            })),
+          ];
 
-                // Handle tool calls from stream
-                const tc = chunk?.tool_calls || chunk?.toolCalls;
-                if (tc && Array.isArray(tc)) {
-                  toolCallsToExecute = tc.map((t: any) => ({
-                    id: t.id || `call_${Date.now()}`,
-                    name: t.function?.name || t.name,
-                    arguments: typeof t.function?.arguments === 'string' ? JSON.parse(t.function.arguments) : (t.arguments || t.function?.arguments || {}),
-                  }));
+          const MAX_ROUNDS = 8;
+          const userText = lastUserMsg?.content || '';
+
+          // === AGENTIC LOOP ===
+          for (let round = 0; round < MAX_ROUNDS; round++) {
+            let llmResponseText = '';
+            let allToolCalls: ToolCall[] = [];
+
+            try {
+              // Call LLM with timeout protection
+              const response = await Promise.race([
+                zai.chat.completions.create({
+                  messages: llmMessages,
+                  stream: false,
+                  thinking: { type: 'disabled' },
+                }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('LLM request timed out after 60s')), 60000)),
+              ]);
+
+              // Parse response safely
+              try {
+                const choice = response?.choices?.[0];
+                if (choice?.message?.content) {
+                  llmResponseText = choice.message.content;
+                } else if (typeof response === 'string') {
+                  llmResponseText = response;
+                } else if (response?.content) {
+                  llmResponseText = response.content;
+                } else if (response?.message?.content) {
+                  llmResponseText = response.message.content;
+                } else {
+                  llmResponseText = JSON.stringify(response).slice(0, 500);
                 }
+              } catch {
+                llmResponseText = 'Received a response but could not parse it.';
               }
-            } else {
-              // Non-streaming response
-              const resp = streamResponse as any;
-              responseText = resp?.content || resp?.text || resp?.message?.content || String(resp);
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'content', text: responseText })}\n\n`));
+            } catch (llmError) {
+              const errMsg = llmError instanceof Error ? llmError.message : String(llmError);
+              console.error('LLM error:', errMsg);
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: `LLM Error: ${errMsg}` })}\n\n`));
+              break;
             }
-          } catch (sdkError) {
-            // Fallback: Built-in agent logic without LLM
-            const userText = lastUserMsg?.content || '';
-            const fallbackResponse = generateSmartResponse(userText);
-            const words = fallbackResponse.split(' ');
-            for (let i = 0; i < words.length; i++) {
-              await new Promise(r => setTimeout(r, 15));
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'content', text: (i > 0 ? ' ' : '') + words[i] })}\n\n`));
-            }
-            responseText = fallbackResponse;
 
-            // Auto-execute tools based on user intent
-            const toolResults = await autoExecuteTools(userText);
-            for (const tr of toolResults) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'tool_start', name: tr.name })}\n\n`));
-              await new Promise(r => setTimeout(r, 200));
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'tool_result', result: { toolCallId: 'auto', toolName: tr.name, output: tr.output } })}\n\n`));
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'tool_end', name: tr.name })}\n\n`));
-            }
-          }
+            // Parse tool calls from response
+            const parsed = parseToolCalls(llmResponseText);
+            const explicitToolCalls = parsed.toolCalls;
 
-          // Execute tool calls if any
-          if (toolCallsToExecute.length > 0) {
-            for (const toolCall of toolCallsToExecute) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'tool_start', name: toolCall.name })}\n\n`));
+            // Also check for auto-executable code blocks
+            const autoExecCalls = extractAutoExecuteCode(parsed.cleanText, userText);
+            allToolCalls = [...explicitToolCalls, ...autoExecCalls];
+
+            // Stream the text content to user
+            if (parsed.cleanText.trim()) {
+              const words = parsed.cleanText.split(/(\s+)/);
+              for (const word of words) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'content', text: word })}\n\n`));
+              }
+              fullResponse += parsed.cleanText;
+            }
+
+            // If no tool calls, we're done
+            if (allToolCalls.length === 0) break;
+
+            // Execute tools
+            let toolResultsText = '';
+            for (const toolCall of allToolCalls) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'tool_start', name: toolCall.function.name, id: toolCall.id })}\n\n`));
+
               const result = await executeTool(toolCall);
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'tool_result', result })}\n\n`));
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'tool_end', name: toolCall.name })}\n\n`));
+              const preview = result.output.slice(0, 3000);
+
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'tool_result', result: { toolCallId: result.toolCallId, toolName: result.toolName, output: preview, isError: result.isError } })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'tool_end', name: toolCall.function.name, id: toolCall.id })}\n\n`));
+
+              toolResultsText += `\n\n**[${result.toolName} Result]**:\n${result.output.slice(0, 4000)}`;
+            }
+
+            fullResponse += toolResultsText;
+
+            // Send tool results back to LLM for it to analyze/continue
+            if (allToolCalls.length > 0 && round < MAX_ROUNDS - 1) {
+              llmMessages.push({ role: 'assistant', content: llmResponseText });
+              llmMessages.push({
+                role: 'user',
+                content: `[Tool execution results for your previous response]:${toolResultsText}\n\nPlease analyze these results and provide a summary or continue if needed.`,
+              });
+              await new Promise(r => setTimeout(r, 500));
             }
           }
 
-          // Save assistant message
-          if (responseText) {
+          // Save to DB
+          if (fullResponse) {
             await db.message.create({
-              data: {
-                conversationId: id,
-                role: 'assistant',
-                content: responseText,
-              },
+              data: { conversationId: id, role: 'assistant', content: fullResponse },
             });
 
-            // Update conversation title from first user message
             const msgCount = await db.message.count({ where: { conversationId: id } });
             if (msgCount <= 2) {
-              const title = lastUserMsg?.content?.slice(0, 50) || 'New Chat';
-              await db.conversation.update({ where: { id }, data: { title: title + (lastUserMsg?.content?.length > 50 ? '...' : '') } });
+              const title = userText.slice(0, 50) || 'New Chat';
+              await db.conversation.update({
+                where: { id },
+                data: { title: title + (userText.length > 50 ? '...' : '') },
+              });
             }
           }
 
@@ -230,6 +281,7 @@ export async function POST(
           controller.close();
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
+          console.error('Stream error:', errMsg);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: errMsg })}\n\n`));
           controller.close();
         }
@@ -251,7 +303,7 @@ export async function POST(
   }
 }
 
-// GET /api/chat/[id] - Get messages
+// GET /api/chat/[id] — Fetch messages
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
