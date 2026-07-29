@@ -1,0 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  title     String   @default("New Chat")
+  model     String   @default("default")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  messages  Message[]
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String   // "user" | "assistant" | "system" | "tool"
+  content        String
+  toolCalls      String?  // JSON string for tool calls
+  toolCallId     String?  // ID linking tool response to tool call
+  metadata       String?  // JSON string for extra info
+  createdAt      DateTime @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model ToolLog {
+  id        String   @id @default(cuid())
+  toolName  String
+  input     String   // JSON
+  output    String?  // JSON or text
+  duration  Int?     // ms
+  status    String   @default("success") // "success" | "error"
+  createdAt DateTime @default(now())
+}
+
+model Settings {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+}
