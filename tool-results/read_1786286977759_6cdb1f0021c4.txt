@@ -1,0 +1,632 @@
+  2390→    local BugHandler = package.loaded["client.network.Protocol.BugHandler"]
+  2391→    if BugHandler then BugHandler.send_report_bug_info = nop; BugHandler.send_report_bug_feedback = nop end
+  2392→    local PingReport = package.loaded["client.network.Protocol.LobbyPingReportHandler"]
+  2393→    if PingReport then PingReport.send_lobby_ping_report = nop; PingReport.send_ingame_ping_report = nop end
+  2394→    local WeekReport = package.loaded["client.network.Protocol.WeekRportHandler"]
+  2395→    if WeekReport then WeekReport.send_week_report = nop; WeekReport.send_week_detail = nop end
+  2396→    local LogicComplaint = package.loaded["client.logic.battle.logic_complaint"]
+  2397→    if LogicComplaint then LogicComplaint.SendComplaintReq = nop; LogicComplaint.Submit = nop; LogicComplaint.ReportPlayer = nop; LogicComplaint.ShowComplaint = nop; LogicComplaint.ShowHandle = nop end
+  2398→    local OBResult = package.loaded["GameLua.Mod.BaseMod.Client.BattleResult.ProcessBase.EscapeBattleResultShowOBResultLogic"]
+  2399→    if OBResult then OBResult.OnBattleResult = nop; OBResult.OnResultProcessStart = nop end
+  2400→    local NormalOBResult = package.loaded["GameLua.Mod.BaseMod.Client.BattleResult.ProcessBase.BattleResultShowOBResultLogic"]
+  2401→    if NormalOBResult then NormalOBResult.OnBattleResult = nop; NormalOBResult.OnResultProcessStart = nop end
+  2402→    local ShowResult = package.loaded["GameLua.Mod.BaseMod.Client.BattleResult.ProcessBase.BattleResultShowResultLogic"]
+  2403→    if ShowResult then
+  2404→        ShowResult.OnBattleResult = nop; ShowResult.OnResultProcessStart = nop; ShowResult.OnResultProcessContinue = nop
+  2405→        ShowResult.ReceiveData = nop; ShowResult.SendEndFlow = nop; ShowResult.OnReport = nop; ShowResult.ShowResult = nop
+  2406→        ShowResult.ShowResultInternal = nop; ShowResult.StopResultProcess = nop
+  2407→    end
+  2408→
+  2409→    local EmuHandler = package.loaded["client.network.Protocol.EmulatorHandler"]
+  2410→    if EmuHandler then EmuHandler.send_emulator_info = nop end
+  2411→    local EmuScanner = package.loaded["client.logic.login.emulator_scanner"]
+  2412→    if EmuScanner then EmuScanner.StartScan = nop; EmuScanner.GetScanResult = returnFalse; EmuScanner.ReportScanResult = nop end
+  2413→    local LoginVerify = package.loaded["client.network.Protocol.LoginVerifyHandler"]
+  2414→    if LoginVerify then LoginVerify.send_login_verify_req = nop; LoginVerify.send_device_verify_req = nop end
+  2415→    local DSMonitor = package.loaded["client.logic.data.logic_ds_monitor"]
+  2416→    if DSMonitor then DSMonitor.OnRecordMsg = nop; DSMonitor.OnReportMsg = nop end
+  2417→    local ClientDataStat = package.loaded["GameLua.Mod.BaseMod.Client.Security.ClientDataStatistcsSubsystem"]
+  2418→    if ClientDataStat then ClientDataStat.StartToCheck = nop; ClientDataStat.OnReceiveRTT = nop; ClientDataStat.OnReceiveJitter = nop; ClientDataStat.ReportAbnormal = nop; ClientDataStat.ResetData = nop end
+  2419→    local VoiceReport = package.loaded["client.slua.logic.chat_voice.logic_chat_voice_report"]
+  2420→    if VoiceReport then VoiceReport.ReportVoiceData = nop; VoiceReport.ReportVoiceText = nop end
+  2421→    local VoiceDoctor = package.loaded["client.slua.logic.chat_voice.logic_chat_voice_doctor"]
+  2422→    if VoiceDoctor then VoiceDoctor.UploadVoiceLog = nop; VoiceDoctor.UploadVoiceException = nop end
+  2423→    local HomeAudit = package.loaded["client.slua.logic.home.Audit.logic_home_audit_state"]
+  2424→    if HomeAudit then HomeAudit.SendAuditState = nop; HomeAudit.ReportAuditResult = nop end
+  2425→    local HomeReport2 = package.loaded["client.slua.logic.home.logic_home_report"]
+  2426→    if HomeReport2 then HomeReport2.ReportHomeData = nop; HomeReport2.ReportHomeVisitor = nop end
+  2427→    local GemReport = package.loaded["client.logic.store.gem_report_utils"]
+  2428→    if GemReport then GemReport.ReportGemData = nop; GemReport.ReportGemPurchase = nop end
+  2429→    local SafeStation = package.loaded["client.slua.logic.CustomerService.LogicSafeStation"]
+  2430→    if SafeStation then SafeStation.UploadVideoEvidence = nop; SafeStation.ReportPlayerBehavior = nop end
+  2431→    local CustomerService = package.loaded["client.slua.logic.CustomerService.LogicCustomerService"]
+  2432→    if CustomerService then CustomerService.SendComplaint = nop; CustomerService.SendFeedback = nop end
+  2433→    local znq6Revive = safe_require("GameLua.Mod.TDEvent.ZNQ6th.DS.ZNQ6thDSReviveSubsystem")
+  2434→    if znq6Revive then znq6Revive.HaveNewItemForRevive = nop end
+  2435→    local znq7Revive = safe_require("GameLua.Mod.TDEvent.ZNQ7th.DS.ZNQ7DSReviveSubsystem")
+  2436→    if znq7Revive then znq7Revive.HaveChanceRevival = nop end
+  2437→    local DataLayer = safe_require("GameLua.Mod.BaseMod.Common.Subsystem.DataLayerSubsystem")
+  2438→    if DataLayer and DataLayer.OnSpectatorReplayChanged then
+  2439→        local origDL = DataLayer.OnSpectatorReplayChanged
+  2440→        DataLayer.OnSpectatorReplayChanged = function(dlSelf) _G.IsBeingWatched = true; origDL(dlSelf) end
+  2441→    end
+  2442→    local DSActive = safe_require("GameLua.Mod.PlanBT.Gameplay.Subsystem.DSActiveSubsystem")
+  2443→    if DSActive then DSActive.DelayKickOutPlayer = nop; DSActive.ActiveKickNotify = nop end
+  2444→    local CreativeDev = safe_require("GameLua.Mod.CreativeBase.Gameplay.Subsystem.CreativeDevDebugSubsystem")
+  2445→    if CreativeDev then CreativeDev.IsDebugPanelEnalbedCli = nop end
+  2446→    local CreativeDeath = safe_require("GameLua.Mod.CreativeBase.Gameplay.Subsystem.CreativeModeDeathRecordSubsystem")
+  2447→    if CreativeDeath then CreativeDeath.OnPlayerKilled = nop end
+  2448→    if _G.ClientReplayDataReporter then
+  2449→        _G.ClientReplayDataReporter.ReportIntArrayData = nop; _G.ClientReplayDataReporter.ReportFloatArrayData = nop
+  2450→    end
+  2451→    local SpectateReplay = safe_require("GameLua.Mod.BaseMod.Common.Subsystem.SpectateAndReplaySubsystem")
+  2452→    if SpectateReplay then SpectateReplay.RequestGotoSpectatingImp = nop; SpectateReplay.RequestGotoSpectating = nop end
+  2453→    local AIReplay = safe_require("GameLua.ExtraModule.MLAI.Client.AIReplaySubsystem")
+  2454→    if AIReplay then
+  2455→        AIReplay.ReportAllPlayerInfo = nop; AIReplay.ReportFrameData = nop; AIReplay.ReportPlayerInput = nop
+  2456→        if AIReplay.uCompletePlayBack then AIReplay.uCompletePlayBack.AddRecordMLAIInfo = nop; AIReplay.uCompletePlayBack.StopRecording = nop end
+  2457→    end
+  2458→    local AITracking = safe_require("GameLua.Mod.BaseMod.GamePlay.AI.AITrackingLogSubsystem")
+  2459→    if AITracking then
+  2460→        AITracking.RealLogoutTimer = nop; AITracking.LogQueue = {}; AITracking.AddToLogQue = nop; AITracking.DoPrint = nop
+  2461→        AITracking.OnAIPawnDied = nop; AITracking.OnAIPawnReceiveDamage = nop; AITracking.OnAIPawnEnemyChange = nop
+  2462→    end
+  2463→    local AFKReport = safe_require("GameLua.Mod.BaseMod.DS.Security.AFKReportorSubsystem")
+  2464→    if AFKReport then
+  2465→        AFKReport.HandleEnterFighting = nop; AFKReport.InitializePlayerInputInfo = nop; AFKReport.AddOneAFKInfo = nop
+  2466→        AFKReport.SetPlayerAFKState = nop; AFKReport.ResetPlayerInputInfo = nop; AFKReport.PlayerHaveAction = nop
+  2467→    end
+  2468→    local TDMAFK = safe_require("GameLua.Mod.TDM.Gameplay.Subsystem.TDMAFKReportorSubsystem")
+  2469→    if TDMAFK then TDMAFK.SendAFKTips = nop; TDMAFK.OnHandleLostConnection = nop end
+  2470→    local DataMgr = package.loaded["client.slua.logic.data.data_mgr"]
+  2471→    if DataMgr then DataMgr.GetWeaponSkinSoundVolumeInfoByGroup = returnZero end
+  2472→    local CreditLogic = safe_require("GameLua.Mod.BaseMod.Client.ClientInGameCreditLogic")
+  2473→    if CreditLogic then
+  2474→        CreditLogic._SendUserReaction2ExitTeamBeforeBoardingReturnLobbyNotice = nop
+  2475→        CreditLogic.ShowReturnLobbyIfFirstExitTeamBeforeBoarding = returnFalse
+  2476→        CreditLogic.OnReceiveCreditScoreChange = nop
+  2477→        CreditLogic._IsFirstExitTeamBeforeBoardingReturnLobbyNoticeEnabled = returnFalse
+  2478→        CreditLogic.SetFirstExitTeamBeforeBoardingReturnLobbyNoticeEnabled = nop
+  2479→    end
+  2480→
+  2481→    local globalFuncs = {
+  2482→        "ReportTLogEvent","SendTlog","SendClientStats","ReportHitFlow","ReportAvatarException",
+  2483→        "SendComplaintReq","SubmitReport","ReportSuspiciousPlayer","SendPacket","OnSyncBanInfo",
+  2484→        "OnVoiceBanNotify","SendSecTLog","MarkSuspiciousPlayer","ReportPlayerBehaviorData",
+  2485→        "CheckCompliance","ReportIllegalProgram","UploadVoiceLog"
+  2486→    }
+  2487→    for _, fn in ipairs(globalFuncs) do
+  2488→        if type(_G[fn]) == "function" then _G[fn] = nop end
+  2489→    end
+  2490→end)
+  2491→
+  2492→-- Network blacklist hosts and file keywords
+  2493→local BLACKLIST_HOSTS = {
+  2494→    "tss.tencent","syzsdk","gcloud.qq","reportlog","tdos","logupload","feedback.wh","crash2",
+  2495→    "privacy.qq","privacy.tencent","oth.eve","mdt.qq","act.tencentyun","analytics","report.qq",
+  2496→    "anticheatexpert","crashsight","wetest","log.tav","sngd","tracer","intlsdk","igamecj",
+  2497→    "cdn.club","gpubgm","graph.facebook","calendarpushsubscription","googleads","doubleclick",
+  2498→    "firebaselogging","firebaseremoteconfig","fonts.googleapis","abs.twimg","dl.listdl",
+  2499→    "igame.gcloudcs","bugly","beacon","helpshift","tdm","apm","safeguard","weiyun","qzone",
+  2500→    "tencent-cloud","myapp","idqqimg","gtimg","qqmail","tcdn","cloudctrl","sdkostrace",
+  2501→    "103.134.189.146","mbgame","csoversea","igame","pubgmobile","down.anticheatexpert.com",
+  2502→    "asia.csoversea.mbgame.anticheatexpert.com","log.tav.qq","syzsdk.qq","logiservice.qcloud",
+  2503→    "opensdk.tencent","exp.helpshift","loginsdkapi.zingplay","firebase","googleapis","facebook","gvoice"
+  2504→}
+  2505→local FILE_KEYWORDS = {
+  2506→    "tlog","crash","bugly","report","beacon","wetest","analytics","telemetry","trace","dump",
+  2507→    "exception","feedback","aps_log","mtp_detect","network_loss","client_error","ue4crash","tdm","gcloud"
+  2508→}
+  2509→
+  2510→local function isBlacklisted(str)
+  2511→    if type(str) ~= "string" then return false end
+  2512→    local low = str:lower()
+  2513→    for _, kw in ipairs(BLACKLIST_HOSTS) do
+  2514→        if low:find(kw, 1, true) then return true end
+  2515→    end
+  2516→    return false
+  2517→end
+  2518→
+  2519→pcall(function()
+  2520→    if _G.HttpRequest then
+  2521→        local origHttp = _G.HttpRequest
+  2522→        _G.HttpRequest = function(url, ...) if isBlacklisted(url) then return nil end return origHttp(url, ...) end
+  2523→    end
+  2524→    if _G.FHttpModule and _G.FHttpModule.CreateRequest then
+  2525→        local origFH = _G.FHttpModule.CreateRequest
+  2526→        _G.FHttpModule.CreateRequest = function(...)
+  2527→            local url = select(1, ...)
+  2528→            if isBlacklisted(url) then return nil end
+  2529→            return origFH(...)
+  2530→        end
+  2531→    end
+  2532→    local netMods = {
+  2533→        "client.slua.logic.network.logic_network","client.slua.logic.download.report.puffer_tlog",
+  2534→        "client.slua.data.BasicData.BasicDataClientReport","GameLua.GameCore.Module.Network.NetworkManager",
+  2535→        "client.network.Protocol.ClientTlogHandler","client.network.Protocol.BattleReportHandler",
+  2536→        "client.network.Protocol.ClientErrorReportHandler"
+  2537→    }
+  2538→    for _, mp in ipairs(netMods) do
+  2539→        local mod = package.loaded[mp]
+  2540→        if mod then
+  2541→            for k, v in pairs(mod) do
+  2542→                if type(v) == "function" and (k:find("Http") or k:find("Request") or k:find("Send") or k:find("Upload") or k:find("Post") or k:find("Get") or k:find("Report")) then
+  2543→                    local origf = v
+  2544→                    mod[k] = function(...)
+  2545→                        local args = {...}
+  2546→                        for _, arg in ipairs(args) do if type(arg)=="string" and isBlacklisted(arg) then return nil end end
+  2547→                        return pcall(origf, ...)
+  2548→                    end
+  2549→                end
+  2550→            end
+  2551→        end
+  2552→    end
+  2553→end)
+  2554→
+  2555→local orig_io_open = io.open
+  2556→io.open = function(path, mode)
+  2557→    if type(path) == "string" then
+  2558→        local lp = path:lower()
+  2559→        for _, kw in ipairs(FILE_KEYWORDS) do
+  2560→            if lp:find(kw) then
+  2561→                if mode and (mode == "w" or mode == "a" or mode == "w+" or mode == "a+") then
+  2562→                    return nil, "Blocked"
+  2563→                end
+  2564→            end
+  2565→        end
+  2566→    end
+  2567→    return orig_io_open(path, mode)
+  2568→end
+  2569→
+  2570→if _G.UnrealEngine and _G.UnrealEngine.CrashContext then
+  2571→    _G.UnrealEngine.CrashContext = nil
+  2572→    _G.UnrealEngine.CrashContext = { SetCrashContext = nop, ReportCrash = nop, AddCrashData = nop }
+  2573→end
+  2574→
+  2575→-- Device info spoofing (old fake data kept but now overridden by device bypass)
+  2576→local FakeData = {
+  2577→    deviceID = function()
+  2578→        local chars = "0123456789ABCDEF"
+  2579→        local id = ""
+  2580→        for i = 1, 32 do id = id .. chars:sub(math.random(1, #chars), math.random(1, #chars)) end
+  2581→        return id
+  2582→    end,
+  2583→    ipAddress = function() return "192.168." .. math.random(1, 255) .. "." .. math.random(1, 255) end,
+  2584→    macAddress = function()
+  2585→        return string.format("%02X:%02X:%02X:%02X:%02X:%02X",
+  2586→            math.random(0,255), math.random(0,255), math.random(0,255),
+  2587→            math.random(0,255), math.random(0,255), math.random(0,255))
+  2588→    end,
+  2589→    kernelVersion = function() return "4.19." .. math.random(100, 200) .. "-generic" end,
+  2590→}
+  2591→
+  2592→-- The iPhone-related SystemInfo/Build spoofing block has been removed as requested.
+  2593→-- The device ban bypass (InstallDeviceBanBypass) already provides full device ID spoofing.
+  2594→
+  2595→-- Comprehensive bypass module (per-match activation)
+  2596→do
+  2597→    local bypass = {}
+  2598→    local function nop() end
+  2599→    local function returnTrue() return true end
+  2600→    local function returnFalse() return false end
+  2601→    local function returnZero() return 0 end
+  2602→    local function returnEmptyTable() return {} end
+  2603→    local function returnEmptyString() return "" end
+  2604→    local function safe_require(mod)
+  2605→        local ok, res = pcall(require, mod)
+  2606→        return ok and res or nil
+  2607→    end
+  2608→    local function tryImport(name)
+  2609→        local ok, lib = pcall(import, name)
+  2610→        return ok and lib or nil
+  2611→    end
+  2612→
+  2613→    local function blockScreenshots()
+  2614→        pcall(function()
+  2615→            local SS = tryImport("ScreenshotMaker") or tryImport("ScreenshotMTDer")
+  2616→            if SS then
+  2617→                SS.MakePicture = function() return "" end
+  2618→                SS.ReMakePicture = function() return "" end
+  2619→                SS.HasCaptured = returnTrue
+  2620→            end
+  2621→        end)
+  2622→    end
+  2623→
+  2624→    local function blockGameplayCallbacks()
+  2625→        if not _G.GameplayCallbacks then _G.GameplayCallbacks = {} end
+  2626→        local GC = _G.GameplayCallbacks
+  2627→        if GC._WHABlocked then return end
+  2628→
+  2629→        local reportFuncs = {
+  2630→            "ReportAttackFlow","ReportSecAttackFlow","ReportHurtFlow","ReportFireArms",
+  2631→            "ReportVerifyInfoFlow","ReportMrpcsFlow","ReportPlayerBehavior","ReportTeammatHurt",
+  2632→            "ReportPlayerMoveRoute","ReportPlayerPosition","ReportAimFlow","ReportHitFlow",
+  2633→            "ReportWallHack","ReportAimbot","ReportSpeedHack","ReportMagicBullet",
+  2634→            "ReportAbnormalMaterial","ReportDepthTestChange","ReportMemoryException",
+  2635→            "ReportMaterialScan","ReportShaderOverride","ReportCircleFlow",
+  2636→            "OnPlayerRPCValidateFailed","OnPlayerActorChannelError",
+  2637→            "OnPlayerSpectateException","OnShutdownAfterError"
+  2638→        }
+  2639→        for _, fn in ipairs(reportFuncs) do GC[fn] = nop end
+  2640→
+  2641→        local oldStateChanged = GC.OnDSPlayerStateChanged
+  2642→        GC.OnDSPlayerStateChanged = function(UID, state, ...)
+  2643→            if state and type(state) == "string" then
+  2644→                local s = state:lower()
+  2645→                if s:find("cheat") or s:find("ban") or s:find("integrity") then return end
+  2646→            end
+  2647→            if oldStateChanged then return oldStateChanged(UID, state, ...) end
+  2648→        end
+  2649→
+  2650→        GC._WHABlocked = true
+  2651→    end
+  2652→
+  2653→    local function spoofTssSdk()
+  2654→        pcall(function() local t = _G.TssSdk if t then t.GetFileMD5, t.VerifyFileSignature, t.CheckIntegrity, t.ScanMemory, t.IsEmulator, t.OnRecvData = function() return "" end, returnTrue, returnTrue, function() return true, {} end, returnFalse, nop end end)
+  2655→    end
+  2656→
+  2657→    local function disableDetectionSubsystems()
+  2658→        local sm = safe_require("GameLua.GameCore.Module.Subsystem.SubsystemMgr")
+  2659→        if not sm then return end
+  2660→
+  2661→        local targetSubs = {
+  2662→            "ClientWallhackDetectionSubsystem", "ClientESPDetectionSubsystem",
+  2663→            "ClientAimTrackingSubsystem", "ShootVerifySubSystemClient",
+  2664→            "ClientRenderCheckSubsystem", "ClientMemoryGuardSubsystem",
+  2665→            "ClientKernelCheckSubsystem", "ClientHawkEyePatrolSubsystem",
+  2666→            "ClientAntiCheatSubsystem", "IntegrityCheckSubsystem",
+  2667→            "FileCheckSubsystem", "AvatarExceptionSubsystem"
+  2668→        }
+  2669→        for _, sn in ipairs(targetSubs) do
+  2670→            local sub = sm:Get(sn)
+  2671→            if sub then
+  2672→                for k, v in pairs(sub) do
+  2673→                    if type(v) == "function" then
+  2674→                        if k:find("Report") or k:find("Send") or k:find("Verify") or
+  2675→                           k:find("Check") or k:find("Detect") or k:find("Scan") then
+  2676→                            sub[k] = nop
+  2677→                        end
+  2678→                    end
+  2679→                end
+  2680→                if sn == "ClientWallhackDetectionSubsystem" then
+  2681→                    sub.IsVisionNormal = returnTrue
+  2682→                    sub.GetVisibilityRate = function() return math.random(60, 85) end
+  2683→                elseif sn == "ClientESPDetectionSubsystem" then
+  2684→                    sub.HasESP = returnFalse
+  2685→                    sub.CheckOverlay = function() return "clean" end
+  2686→                elseif sn == "ClientAimTrackingSubsystem" then
+  2687→                    sub.GetAimData = function()
+  2688→                        return { accuracy = math.random(45,65), headshotRate = math.random(15,35) }
+  2689→                    end
+  2690→                    sub.IsAimNormal = returnTrue
+  2691→                elseif sn == "ClientMemoryGuardSubsystem" then
+  2692→                    sub.IsMemoryClean = function() return true, {code=0} end
+  2693→                    sub.ScanResult = function() return "clean" end
+  2694→                elseif sn == "ShootVerifySubSystemClient" then
+  2695→                    sub.OnShootVerifyFailed = nop; sub.VerifyShot = returnTrue
+  2696→                end
+  2697→            end
+  2698→        end
+  2699→    end
+  2700→
+  2701→    local function spoofBehavior()
+  2702→        pcall(function()
+  2703→            local sm = safe_require("GameLua.GameCore.Module.Subsystem.SubsystemMgr")
+  2704→            if not sm then return end
+  2705→            
+  2706→            local hooks = {
+  2707→                ClientAimTrackingSubsystem = {
+  2708→                    GetAimData = function() return { accuracy = math.random(48,58), headshotRate = math.random(18,28) } end,
+  2709→                    IsAimNormal = returnTrue
+  2710→                },
+  2711→                ClientHawkEyePatrolSubsystem = {
+  2712→                    GetPatrolData = returnEmptyTable, IsBeingWatched = returnFalse, GetSpectatorCount = returnZero
+  2713→                },
+  2714→                ClientRenderCheckSubsystem = {
+  2715→                    IsRenderClean = returnTrue, GetRenderState = function() return "normal" end
+  2716→                },
+  2717→                ClientESPDetectionSubsystem = {
+  2718→                    HasESP = returnFalse, CheckOverlay = function() return "clean" end
+  2719→                },
+  2720→                ClientWallhackDetectionSubsystem = {
+  2721→                    IsVisionNormal = returnTrue, GetVisibilityRate = function() return math.random(70,80) end
+  2722→                }
+  2723→            }
+  2724→            
+  2725→            for mod, methods in pairs(hooks) do
+  2726→                local m = sm:Get(mod)
+  2727→                if m then for k, v in pairs(methods) do m[k] = v end end
+  2728→            end
+  2729→        end)
+  2730→    end
+  2731→
+  2732→    local function disableHiggsBoson()
+  2733→        pcall(function()
+  2734→            local hbc = safe_require("GameLua.Mod.BaseMod.Common.Security.HiggsBosonComponent")
+  2735→            if hbc then
+  2736→                hbc.bMHActive = false
+  2737→                hbc.bCallPreReplication = false
+  2738→                if hbc.ControlMHActive then hbc.ControlMHActive = nop end
+  2739→                if hbc.StartAvatarCheck then hbc.StartAvatarCheck = nop end
+  2740→                if hbc.BlackList then for k in pairs(hbc.BlackList) do hbc.BlackList[k] = nil end end
+  2741→            end
+  2742→            if _G.AvatarCheckCallback then
+  2743→                _G.AvatarCheckCallback.StartAvatarCheck = nop
+  2744→                _G.AvatarCheckCallback.OnReportItemID = nop
+  2745→            end
+  2746→            _G.BlackList = {}
+  2747→        end)
+  2748→    end
+  2749→
+  2750→    local function spoofMemoryAndKernel()
+  2751→        pcall(function()
+  2752→            local sm = safe_require("GameLua.GameCore.Module.Subsystem.SubsystemMgr")
+  2753→            if sm then
+  2754→                local sub = sm:Get("ClientMemoryGuardSubsystem")
+  2755→                if sub then sub.IsMemoryClean, sub.ScanResult = function() return true, {code=0} end, function() return "clean" end end
+  2756→                sub = sm:Get("ClientKernelCheckSubsystem")
+  2757→                if sub then sub.IsKernelClean, sub.GetKernelVersion, sub.IsBootloaderLocked = returnTrue, function() return "4.19.150-generic" end, returnTrue end
+  2758→            end
+  2759→            if _G.TssSdk then _G.TssSdk.CheckKernel, _G.TssSdk.VerifyBoot = function() return true, {status="verified", tampered=false} end, function() return true, {locked=true, verified=true} end end
+  2760→        end)
+  2761→    end
+  2762→
+  2763→    function bypass.Init()
+  2764→        blockScreenshots()
+  2765→        blockGameplayCallbacks()
+  2766→        spoofTssSdk()
+  2767→        disableDetectionSubsystems()
+  2768→        spoofBehavior()
+  2769→        disableHiggsBoson()
+  2770→        spoofMemoryAndKernel()
+  2771→    end
+  2772→
+  2773→    _G.WHABypass = bypass
+  2774→end
+  2775→
+  2776→-- BRPlayerCharacterBase class
+  2777→local BRPlayerCharacterBase = {
+  2778→  ServerRPC = {},
+  2779→  ClientRPC = {},
+  2780→  MulticastRPC = {}
+  2781→}
+  2782→
+  2783→BRPlayerCharacterBase.ServerRPC.ServerRPC_NearDeathGiveupRescue = { Reliable = true, Params = {} }
+  2784→BRPlayerCharacterBase.ServerRPC.ServerRPC_CarryDeadBox = { Reliable = true, Params = { UEnums.EPropertyClass.Object } }
+  2785→BRPlayerCharacterBase.ServerRPC.RPC_Server_GmPlayAction = { Reliable = true, Params = { UEnums.EPropertyClass.Int } }
+  2786→BRPlayerCharacterBase.MulticastRPC.MulticastRPC_GmPlayAction = { Reliable = true, Params = { UEnums.EPropertyClass.Int } }
+  2787→BRPlayerCharacterBase.ClientRPC.RPC_Client_SetShouldCheckPassWall = { Reliable = true, Params = { UEnums.EPropertyClass.Bool } }
+  2788→BRPlayerCharacterBase.ClientRPC.ClientRPC_TriggerHighlightMoment = { Reliable = true, Params = { UEnums.EPropertyClass.UInt32, UEnums.EPropertyClass.UInt32 } }
+  2789→
+  2790→function BRPlayerCharacterBase:ctor()
+  2791→    self.bHasShownDevNotice = false
+  2792→    self.AK_NativeESP_Ready = false
+  2793→    self.bHiggsTimerSet = false
+  2794→    self._newWallhackStarted = false
+  2795→end
+  2796→
+  2797→function BRPlayerCharacterBase:_PostConstruct()
+  2798→    BRPlayerCharacterBase.__super._PostConstruct(self)
+  2799→    self:InitAddSpecialMoveInfo()
+  2800→    self.bCanNearDeathGiveup = true
+  2801→    self:StartAdvancedSystems()
+  2802→end
+  2803→
+  2804→function BRPlayerCharacterBase:ReceiveBeginPlay()
+  2805→    BRPlayerCharacterBase.__super.ReceiveBeginPlay(self)
+  2806→    self:AddControlEvent(self, "MovementModeChangedDelegate", self.HandleOnMovementModeChangedNew, self)
+  2807→    if self:HasAuthority() and self:CheckAddCheckFallingDistanceComponent() then
+  2808→        local CheckFallingDistanceComponent_C = import("CheckFallingDistanceComponent")
+  2809→        if slua.isValid(CheckFallingDistanceComponent_C) and not slua.isValid(self:GetComponentByClass(CheckFallingDistanceComponent_C)) then
+  2810→            Game:AddComponent(CheckFallingDistanceComponent_C, self, "CheckFallingDistanceComponent")
+  2811→        end
+  2812→    end
+  2813→    if slua.isValid(self.STCharacterMovement) then
+  2814→        self.STCharacterMovement.bPositiveBlowUp = true
+  2815→    end
+  2816→    if self.Role == ENetRole.ROLE_AutonomousProxy then
+  2817→        self:AddControlEvent(self, "OnPawnStateDisabled", self.OnPawnStateChange, self)
+  2818→        self:AddControlEvent(self, "OnPawnStateEnabled", self.OnPawnStateChange, self)
+  2819→        self:AddControlEventConditionOnly(self, "OnAttrChangeEventDelegate", { AttrName = { "bCanSelfRescue" } }, self.CharacterAttrChangeEvent, self)
+  2820→    end
+  2821→    if Client then
+  2822→        GameplayData.AddCharacter(self.Object)
+  2823→    else
+  2824→        self:AddCommonEventWithConditions(EVENTTYPE_INGAME_NORMAL, EVENTID_GAME_MODE_STATE_CHANGE, { [1] = "FinishedState" }, self.HandleFinishedState, self)
+  2825→    end
+  2826→    EventSystem:postEvent(EVENTTYPE_SINGLETRAINING, EVENTID_CHARACTER_BEGINPLAY, self.Object)
+  2827→end
+  2828→
+  2829→function BRPlayerCharacterBase:ReceiveEndPlay(endPlayReason)
+  2830→    BRPlayerCharacterBase.__super.ReceiveEndPlay(self, endPlayReason)
+  2831→    if Client and GameplayData.RemoveCharacter then GameplayData.RemoveCharacter(self.Object) end
+  2832→end
+  2833→
+  2834→function BRPlayerCharacterBase:StartAdvancedSystems()
+  2835→    if not Client then return end
+  2836→    if not CheckExpiration() then ShowExpiryPopup(true); return end
+  2837→    InitDistanceMarkerSystem()
+  2838→
+  2839→    if not self.bHiggsTimerSet then
+  2840→        self.bHiggsTimerSet = true
+  2841→        self:AddGameTimer(0.1, true, function()
+  2842→            if not slua.isValid(self.Object) then return end
+  2843→            pcall(function()
+  2844→                local lpc = slua_GameFrontendHUD and slua_GameFrontendHUD:GetPlayerController()
+  2845→                if slua.isValid(lpc) and lpc.HiggsBosonComponent then
+  2846→                    lpc.HiggsBosonComponent.bMHActive = false
+  2847→                end
+  2848→            end)
+  2849→        end)
+  2850→    end
+  2851→
+  2852→    self:AddGameTimer(0.4, true, function()
+  2853→        if not slua.isValid(self.Object) then return end
+  2854→        if not CheckExpiration() then ShowExpiryPopup(true); return end
+  2855→        local localPlayer = GameplayData.GetPlayerCharacter()
+  2856→        if not slua.isValid(localPlayer) then return end
+  2857→
+  2858→        if self.Object == localPlayer then
+  2859→            if not localPlayer._bypassActive then
+  2860→                localPlayer._bypassActive = true
+  2861→                pcall(function()
+  2862→                    if _G.WHABypass and _G.WHABypass.Init then
+  2863→                        _G.WHABypass.Init()
+  2864→                        _G._WHA_BYPASS_ACTIVE = true
+  2865→                    end
+  2866→                end)
+  2867→
+  2868→                self:AddGameTimer(3.0, false, function()
+  2869→                    pcall(function()
+  2870→                        local M = package.loaded["client.slua.logic.common.logic_common_msg_box"]
+  2871→                               or require("client.slua.logic.common.logic_common_msg_box")
+  2872→                        M.Show(4, "Bypass Active", "✔ Island bypass activated ✔\n ✔ Play safe • avoid reports ✔\nKill limit 8-10\nTelegram • @zerox6t", function() end)
+  2873→                    end)
+  2874→                end)
+  2875→            end
+  2876→
+  2877→            if not localPlayer._monitorsSetup then
+  2878→                localPlayer._monitorsSetup = true
+  2879→                localPlayer:AddGameTimer(0.5, true, function()
+  2880→                    if not _G._WHA_BYPASS_ACTIVE then
+  2881→                        pcall(function()
+  2882→                            if _G.WHABypass and _G.WHABypass.Init then
+  2883→                                _G.WHABypass.Init()
+  2884→                                _G._WHA_BYPASS_ACTIVE = true
+  2885→                            end
+  2886→                        end)
+  2887→                    end
+  2888→                end)
+  2889→                localPlayer:AddGameTimer(10.0, true, function()
+  2890→                    pcall(function()
+  2891→                        if _G.WHABypass and _G.WHABypass.Init then
+  2892→                            _G.WHABypass.Init()
+  2893→                            _G._WHA_BYPASS_ACTIVE = true
+  2894→                        end
+  2895→                    end)
+  2896→                end)
+  2897→            end
+  2898→
+  2899→            -- Start new wallhack timer
+  2900→            if not self._newWallhackStarted then
+  2901→                self._newWallhackStarted = true
+  2902→                pcall(function()
+  2903→                    if _G.StartNewWallhack then _G.StartNewWallhack() end
+  2904→                end)
+  2905→            end
+  2906→
+  2907→            _G.AKModTickCount = (_G.AKModTickCount or 0) + 1
+  2908→            if _G.AKModTickCount % 6 == 0 then cleanupDeadEnemyMarks() end
+  2909→
+  2910→            if not self.AK_NativeESP_Ready then
+  2911→                pcall(function()
+  2912→                    local gameplayTools = require("GameLua.Mod.BaseMod.Common.GamePlayTools")
+  2913→                    local screenMarkConfig = gameplayTools.GetCurrentConfig("ScreenMarkConfig")
+  2914→                    if screenMarkConfig then
+  2915→                        if screenMarkConfig[1006] then
+  2916→                            screenMarkConfig[1006].bBindBlocked = true
+  2917→                            screenMarkConfig[1006].bBindOutScreen = true
+  2918→                            screenMarkConfig[1006].MaxWidgetNum = 99
+  2919→                            screenMarkConfig[1006].MaxShowDistance = 6000000
+  2920→                        end
+  2921→                        screenMarkConfig[9999] = distanceMarkerConfig
+  2922→                    end
+  2923→                end)
+  2924→                self.AK_NativeESP_Ready = true
+  2925→            end
+  2926→
+  2927→            local enemyCharacters = GameplayData.GetAllPlayerCharacters and GameplayData.GetAllPlayerCharacters() or {}
+  2928→            local isMapESP = _G.AK_GetVal("ESP_MAP")
+  2929→            local pc = slua_GameFrontendHUD and slua_GameFrontendHUD:GetPlayerController()
+  2930→            local camForward = pc and KismetMathLibrary.GetForwardVector(pc:GetControlRotation())
+  2931→
+  2932→            for _, enemy in pairs(enemyCharacters) do
+  2933→                if slua.isValid(enemy) and enemy ~= localPlayer and enemy.TeamID ~= localPlayer.TeamID then
+  2934→                    local isDead = false
+  2935→                    pcall(function()
+  2936→                        if type(enemy.IsDead)=="function" then isDead = enemy:IsDead()
+  2937→                        elseif enemy.bIsDead then isDead = true end
+  2938→                        if enemy.bHidden or (enemy.Mesh and enemy.Mesh.bHidden) then isDead = true end
+  2939→                    end)
+  2940→                    if isDead then goto skip_enemy end
+  2941→
+  2942→                    -- Process map ESP
+  2943→                    processEnemyMapESP(enemy, localPlayer, isMapESP)
+  2944→
+  2945→                    if _G.AK_GetVal("ESP_HP") == 1 then
+  2946→                        if not enemy.bHasAKNativeHPBar then
+  2947→                            pcall(function()
+  2948→                                enemy.NativeHPBarMark = InGameMarkTools.ClientAddMapMark(1006, FVector(0,0,0), 0, "", 4, enemy)
+  2949→                                enemy.bHasAKNativeHPBar = true
+  2950→                            end)
+  2951→                        end
+  2952→                    elseif enemy.bHasAKNativeHPBar then
+  2953→                        pcall(function() InGameMarkTools.ClientRemoveMapMark(enemy.NativeHPBarMark) end)
+  2954→                        enemy.bHasAKNativeHPBar = false
+  2955→                    end
+  2956→
+  2957→                    if _G.AK_GetVal("ESP_BOX") == 1 then
+  2958→                        pcall(function()
+  2959→                            if enemy.Replay_IsEnemyFrameUIExisted and not enemy:Replay_IsEnemyFrameUIExisted() then
+  2960→                                enemy:Replay_CreateEnemyFrameUI(true, true)
+  2961→                            end
+  2962→                            if enemy.Replay_SetVisiableOfFrameUI then enemy:Replay_SetVisiableOfFrameUI(true) end
+  2963→                        end)
+  2964→                    else
+  2965→                        pcall(function()
+  2966→                            if enemy.Replay_SetVisiableOfFrameUI then enemy:Replay_SetVisiableOfFrameUI(false) end
+  2967→                        end)
+  2968→                    end
+  2969→
+  2970→                    ::skip_enemy::
+  2971→                end
+  2972→            end
+  2973→
+  2974→            if _G.AK_GetVal("AIMBOT") == 1 and (not self._lastAimbotTime or (os.clock() - self._lastAimbotTime) > 2.0) then
+  2975→                ApplyHardAimbot()
+  2976→                self._lastAimbotTime = os.clock()
+  2977→            end
+  2978→        end
+  2979→    end)
+  2980→end
+  2981→
+  2982→pcall(function()
+  2983→    local ticker = require("common.time_ticker")
+  2984→    if ticker and ticker.AddTimerOnce then
+  2985→        ticker.AddTimerOnce(3, function() if CheckExpiration() then end end)
+  2986→        ticker.AddTimerOnce(4, function()
+  2987→            if not CheckExpiration() then ShowExpiryPopup(true) else _G.TryShowWelcome() end
+  2988→        end)
+  2989→    else
+  2990→        _G.TryShowWelcome()
+  2991→    end
+  2992→end)
+  2993→
+  2994→function _G.InitializeAllSystems()
+  2995→    if not CheckExpiration() then ShowExpiryPopup(true); return end
+  2996→    local gameplayData = package.loaded["GameLua.GameCore.Data.GameplayData"] or require("GameLua.GameCore.Data.GameplayData")
+  2997→    if gameplayData then
+  2998→        pcall(function()
+  2999→            local pc = gameplayData.GetPlayerCharacter and gameplayData.GetPlayerCharacter()
+  3000→            if slua.isValid(pc) then pc.StartAdvancedSystems = BRPlayerCharacterBase.StartAdvancedSystems end
+  3001→        end)
+  3002→    end
+  3003→end
+  3004→_G.InitializeAllSystems()
+  3005→
+  3006→local class = require("class")
+  3007→local CharacterBase = require("GameLua.GameCore.Framework.CharacterBase")
+  3008→local BRCharacterClass = class(CharacterBase, nil, BRPlayerCharacterBase)
+  3009→
+  3010→return require("combine_class").DeclareFeature(BRCharacterClass, {
+  3011→    { SkyTransition = "GameLua.Mod.BaseMod.Gameplay.Feature.SkyControl.PlayerCharacterSkyTransitionFeature" },
+  3012→    { CarryDeadBoxFeature = "GameLua.Mod.Library.GamePlay.Feature.CarryDeadBoxFeature" },
+  3013→    { SpecialSuitFeature = "GameLua.Mod.Library.GamePlay.Feature.SpecialSuitFeature" },
+  3014→    { TeleportPawnFeature = "GameLua.Mod.Library.GamePlay.Feature.TeleportPawnFeature" },
+  3015→    { LifterControl = "GameLua.Mod.BaseMod.Gameplay.Feature.Player.CharacterLifterControlFeature" },
+  3016→    { FinalKillEffect = "GameLua.Mod.BaseMod.Gameplay.Feature.Player.PlayerCharacterFinalKillEffectFeature" },
+  3017→    { CampFeature = "GameLua.Mod.BaseMod.GamePlay.Feature.Camp.PlayerCharacterCampFeature" },
+  3018→    { BuildSkateFeature = "GameLua.Mod.BaseMod.GamePlay.Feature.PlayerCharacterBuildVehicleFeature" },
+  3019→    { CommonBornlandTransformFeature = "GameLua.Mod.BaseMod.GamePlay.Feature.HeroPropFeature.CommonBornlandTransformFeature" },
+  3020→    { ParachuteFormation = "GameLua.Mod.BaseMod.GamePlay.Feature.ParachuteFormationFeature" }
+  3021→}, "BRPlayerCharacterBase")
