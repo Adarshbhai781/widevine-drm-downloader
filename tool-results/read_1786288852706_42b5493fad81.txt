@@ -1,0 +1,502 @@
+  1900→pcall(function()
+  1901→    local SubsystemMgr = safeRequire("GameLua.GameCore.Module.Subsystem.SubsystemMgr")
+  1902→    if SubsystemMgr then
+  1903→        local hb = SubsystemMgr:Get("HeartbeatSubsystem")
+  1904→        if hb then
+  1905→            -- Instead of killing heartbeat, keep timer but send clean data
+  1906→            if hb.SendHeartbeat and not hb.__v2FakeHB then
+  1907→                local origSendHB = hb.SendHeartbeat
+  1908→                hb.SendHeartbeat = function(self, ...)
+  1909→                    if isBypassActive() then
+  1910→                        -- Forward heartbeat with clean data to prevent server disconnect
+  1911→                        return pcall(origSendHB, self, ...)
+  1912→                    end
+  1913→                    return origSendHB(self, ...)
+  1914→                end
+  1915→                hb.__v2FakeHB = true
+  1916→            end
+  1917→        end
+  1918→    end
+  1919→end)
+  1920→
+  1921→-- ========================================================================
+  1922→-- SECTION 26: CORONA LAB / TELEMETRY / MODIFIER / SIMULATE
+  1923→-- ========================================================================
+  1924→pcall(function()
+  1925→    if _G.CoronaLab then
+  1926→        _G.CoronaLab.ReportData = nop; _G.CoronaLab.SendData = nop; _G.CoronaLab.CollectData = nop; _G.CoronaLab.Telemetry = nop
+  1927→    end
+  1928→    local SubsystemMgr = safeRequire("GameLua.GameCore.Module.Subsystem.SubsystemMgr")
+  1929→    if SubsystemMgr then
+  1930→        local cl = SubsystemMgr:Get("CoronaLabSubsystem")
+  1931→        if cl then cl.ReportData = nop; cl.SendToServer = nop; cl.CollectTelemetry = nop; cl.StopCollection = nop end
+  1932→    end
+  1933→    _G.GlobalPlayerCoronaData = _G.GlobalPlayerCoronaData or {}
+  1934→    for k in pairs(_G.GlobalPlayerCoronaData) do _G.GlobalPlayerCoronaData[k] = nil end
+  1935→    local mt = getmetatable(_G.GlobalPlayerCoronaData) or {}
+  1936→    mt.__newindex = function() end
+  1937→    setmetatable(_G.GlobalPlayerCoronaData, mt)
+  1938→end)
+  1939→
+  1940→pcall(function()
+  1941→    if _G.bReportedModifierException then _G.bReportedModifierException = false end
+  1942→    local mod = safeRequire("GameLua.Mod.BaseMod.Common.Security.ModifierExceptionSubsystem")
+  1943→    if mod then mod.ReportException = nop; mod.CheckModifier = retTrue; mod.ValidateModifier = retTrue; mod.ReportModifierError = nop end
+  1944→end)
+  1945→
+  1946→pcall(function()
+  1947→    local mod = safeRequire("GameLua.Mod.BaseMod.Gameplay.Simulate.SimulateCharacterSubsystem")
+  1948→    if mod then mod.ReportLocation = nop; mod.SendLocationData = nop; mod.VerifyLocation = retTrue end
+  1949→end)
+  1950→
+  1951→pcall(function()
+  1952→    local mod = safeRequire("GameLua.Dev.Subsystem.ShootVerifySubSystemClient")
+  1953→    if mod then
+  1954→        mod.OnShootVerifyFailed = nop; mod.SendVerifyData = nop; mod.ReportBulletHit = nop
+  1955→        mod.UploadHitInfo = nop; mod.VerifyShot = retTrue
+  1956→    end
+  1957→    if _G.BulletHitInfoUploadData then
+  1958→        _G.BulletHitInfoUploadData.Report = nop; _G.BulletHitInfoUploadData.Send = nop; _G.BulletHitInfoUploadData.Upload = nop
+  1959→    end
+  1960→end)
+  1961→
+  1962→-- ========================================================================
+  1963→-- SECTION 27: REPORT PLAYER SUBSYSTEMS
+  1964→-- ========================================================================
+  1965→pcall(function()
+  1966→    local ClientSub = nil
+  1967→    for _, p in ipairs({"GameLua.Mod.BaseMod.Client.Security.ClientReportPlayerSubsystem", "Client.Security.ClientReportPlayerSubsystem"}) do
+  1968→        if package.loaded[p] then ClientSub = package.loaded[p]; break end
+  1969→        local ok, mod = pcall(require, p)
+  1970→        if ok and mod then ClientSub = mod; break end
+  1971→    end
+  1972→    if ClientSub then
+  1973→        ClientSub.OnInit = nop; ClientSub._OnPlayerKilledOtherPlayer = nop
+  1974→        ClientSub._RecordFatalDamager = nop; ClientSub._OnDeathReplayDataWhenFatalDamaged = nop
+  1975→        ClientSub._RecordMurdererFromDeathReplayData = nop; ClientSub._RecordTeammatePlayerInfo = nop
+  1976→        ClientSub._OnBattleResult = nop; ClientSub._OnShowQuickReportMutualExclusiveUI = nop
+  1977→        ClientSub.GetFatalDamagerMap = retEmpty
+  1978→        ClientSub.GetCachedTeammateName2InfoMap = retEmpty
+  1979→        ClientSub.GetTeammateName2InfoMapDuringBattle = retEmpty
+  1980→        ClientSub.GetCurrentNotInTeamHistoricalTeammateMap = retEmpty
+  1981→        ClientSub.GetInTeamIndexFromHistoricalTeammateInfo = function() return -1 end
+  1982→    end
+  1983→    local DSSub = nil
+  1984→    for _, p in ipairs({"GameLua.Mod.BaseMod.DS.Security.DSReportPlayerSubsystem", "GameLua.Mod.BaseMod.Client.Security.DSReportPlayerSubsystem"}) do
+  1985→        if package.loaded[p] then DSSub = package.loaded[p]; break end
+  1986→        local ok, mod = pcall(require, p)
+  1987→        if ok and mod then DSSub = mod; break end
+  1988→    end
+  1989→    if DSSub then
+  1990→        DSSub.OnInit = nop; DSSub._OnNearDeathOrRescued = nop; DSSub._OnCharacterDied = nop
+  1991→        DSSub._OnTeammateDamage = nop; DSSub._OnPlayerSettlementStart = nop
+  1992→        DSSub._AddKnockDownerToBattleResult = nop; DSSub._AddKillerToBattleResult = nop
+  1993→        DSSub._AddTeammateMurderToBattleResult = nop; DSSub._AddFatalDamagerMapToBattleResult = nop
+  1994→        DSSub._AddMLKillerUIDToBattleResult = nop; DSSub._SaveHistoricalTeammateInfo = nop
+  1995→        DSSub._RecordFatalDamager = nop; DSSub._RecordTeammateMurderer = nop
+  1996→    end
+  1997→    local RPUtils = safeRequire("GameLua.Mod.BaseMod.Common.Security.ReportPlayerUtils")
+  1998→    if RPUtils then RPUtils.RecordFatalDamager = nop; RPUtils.IsUsingHistoricalTeammateInfo = retFalse; RPUtils.IsCharacterDeliverAI = retFalse end
+  1999→    local SecUtils = safeRequire("GameLua.Mod.BaseMod.Common.Security.SecurityCommonUtils")
+  2000→    if SecUtils then SecUtils.ExtractPlayerBasicInfo = retEmpty; SecUtils.LogIf = retFalse end
+  2001→    local QuickReport = safeRequire("GameLua.Mod.BaseMod.Client.Security.ClientQuickReportMaliciousTeammate")
+  2002→    if QuickReport then QuickReport.OnShowMutualExclusiveUI = nop; QuickReport.OnHideMutualExclusiveUI = nop end
+  2003→end)
+  2004→
+  2005→-- ========================================================================
+  2006→-- SECTION 28: GENERIC SUBSYSTEMS MASSACRE
+  2007→-- ========================================================================
+  2008→pcall(function()
+  2009→    local SubsystemMgr = safeRequire("GameLua.GameCore.Module.Subsystem.SubsystemMgr")
+  2010→    if not SubsystemMgr then return end
+  2011→    local allSubs = {
+  2012→        "CoronaLabSubsystem","PlayerSecurityInfoSubsystem","ClientCircleFlowSubsystem",
+  2013→        "ModifierExceptionSubsystem","SimulateCharacterSubsystem","ShootVerifySubSystemClient",
+  2014→        "HiggsBosonComponent","ClientReportPlayerSubsystem","DSReportPlayerSubsystem",
+  2015→        "ClientHawkEyePatrolSubsystem","DSHawkEyePatrolSubsystem","ClientDataStatistcsSubsystem",
+  2016→        "AFKReportorSubsystem","BehaviorScoreSubsystem","FileCheckSubsystem","MemoryCheckSubsystem",
+  2017→        "SpeedCheckSubsystem","WallCheckSubsystem","AvatarExceptionSubsystem","GameReportSubsystem",
+  2018→        "RescueBtnReplayTraceSubsystem","ClientSecMrpcsFlowSubsystem","MrpcsFlowSubsystem",
+  2019→        "PlayerKillFlowSubsystem","CircleFlowSubsystem","SwiftHawkSubsystem","HeartbeatSubsystem",
+  2020→        "AntiCheatSubsystem","IntegrityCheckSubsystem","SignatureVerifySubsystem","MD5CheckSubsystem",
+  2021→        "PakVerifySubsystem"
+  2022→    }
+  2023→    for _, sn in ipairs(allSubs) do
+  2024→        local sub = SubsystemMgr:Get(sn)
+  2025→        if sub then
+  2026→            for k, v in pairs(sub) do
+  2027→                if type(v) == "function" and (k:find("Report") or k:find("Send") or k:find("Upload") or
+  2028→                    k:find("Verify") or k:find("Check") or k:find("Validate") or k:find("Scan") or
+  2029→                    k:find("Detect") or k:find("Collect") or k:find("Flow") or k:find("Heartbeat")) then
+  2030→                    pcall(function() sub[k] = nop end)
+  2031→                end
+  2032→            end
+  2033→            if sub.timer then pcall(function() sub:RemoveGameTimer(sub.timer) end) end
+  2034→            if sub.heartbeatTimer then pcall(function() sub:RemoveGameTimer(sub.heartbeatTimer) end) end
+  2035→            if sub.reportTimer then pcall(function() sub:RemoveGameTimer(sub.reportTimer) end) end
+  2036→        end
+  2037→    end
+  2038→end)
+  2039→
+  2040→-- ========================================================================
+  2041→-- SECTION 29: GLOBAL FLAGS / MINOR BYPASSES / BAN / HAWKEYE / EMULATOR
+  2042→-- ========================================================================
+  2043→pcall(function()
+  2044→    local flags = {"ENABLE_REPORT","ENABLE_ANTI_CHEAT","ENABLE_SECURITY","ENABLE_TELEMETRY","ENABLE_ANALYTICS","ENABLE_CRASH_REPORT","ENABLE_PERFORMANCE_REPORT"}
+  2045→    for _, f in ipairs(flags) do if _G[f] then _G[f] = false end end
+  2046→end)
+  2047→
+  2048→pcall(function()
+  2049→    local stExtra = tryImport("STExtraBlueprintFunctionLibrary")
+  2050→    if stExtra and stExtra.IsDevelopment then stExtra.IsDevelopment = retFalse end
+  2051→    if Client then Client.IsDevelopment = retFalse; Client.IsShipping = retFalse end
+  2052→    if Server then Server.IsShipping = retFalse end
+  2053→
+  2054→    local ToolReport = package.loaded["client.slua.logic.report.ToolReportUtil"]
+  2055→    if ToolReport then ToolReport.IsReleaseVersion = retFalse; ToolReport.IsWhite = retFalse; ToolReport.GetReportSwitch = retFalse end
+  2056→
+  2057→    if _G.TApmHelper then _G.TApmHelper.postEvent = nop end
+  2058→
+  2059→    local PC = _G.PacketCallbacks
+  2060→    if PC then
+  2061→        PC.player_report_cheat = nop; PC.upload_loots_rsp = nop; PC.watch_player_exit = nop
+  2062→        PC.player_login_report = nop; PC.player_logout_report = nop; PC.server_time_report = nop
+  2063→    end
+  2064→
+  2065→    local sdm = _G.ServerDataMgr
+  2066→    if sdm and sdm.DeletablePlayerResultKey then
+  2067→        sdm.DeletablePlayerResultKey.SuspiciousHitCount = true
+  2068→        sdm.DeletablePlayerResultKey.EspTotalSimTraceCnt = true
+  2069→        sdm.DeletablePlayerResultKey.EspTotalImeFocusCnt = true
+  2070→        sdm.DeletablePlayerResultKey.ClientGravityAnomalyCount = true
+  2071→    end
+  2072→
+  2073→    local pcNotify = package.loaded["GameLua.Mod.BaseMod.Common.Security.SecurityNotifyPCFeature"]
+  2074→    if pcNotify then
+  2075→        pcNotify.ClientRPC_SyncBanID = nop; pcNotify.ClientRPC_StrongTips = nop
+  2076→        pcNotify.ClientRPC_NormalTips = nop; pcNotify.Notify = nop
+  2077→        pcNotify.ClientRPC_NotifyBan = nop; pcNotify.ClientRPC_NotifyPunish = nop
+  2078→        pcNotify.ClientRPC_NotifyIllegalProgram = nop
+  2079→    end
+  2080→
+  2081→    local secUtils = package.loaded["GameLua.Mod.BaseMod.Common.Security.SecurityCommonUtils"]
+  2082→    if secUtils and secUtils.EStrategyTypeInReplay then
+  2083→        secUtils.EStrategyTypeInReplay.EspTotalSimTraceCnt = 0
+  2084→        secUtils.EStrategyTypeInReplay.EspTotalImeFocusCnt = 0
+  2085→        secUtils.EStrategyTypeInReplay.ClientGravityAnomalyCount = 0
+  2086→        secUtils.EStrategyTypeInReplay.FlyingErrorCnt = 0
+  2087→    end
+  2088→
+  2089→    local hia = safeRequire("GameLua.Mod.BaseMod.Client.Security.ClientGlueHiaSystem")
+  2090→    if hia then hia.CheckHitIntegrity = nop; hia.InitSession = nop; hia.OnBattleEnd = nop end
+  2091→
+  2092→    local Behavior = safeRequire("GameLua.Mod.Escape.Gameplay.Subsystem.BehaviorScoreSubsystem")
+  2093→    if Behavior then Behavior.OnHandleBehaviorScore = nop; Behavior.AIPerceptionScore = nop; Behavior.ReportBehavior = nop; Behavior.CalcFinalScore = retZero end
+  2094→
+  2095→    local BanLogic = package.loaded["client.slua.logic.ban.ClientBanLogic"]
+  2096→    if BanLogic then BanLogic.OnSyncBanInfo = nop; BanLogic.OnVoiceBanNotify = nop; BanLogic.OnRealTimeVoiceBanNotify = nop; BanLogic.OnVoiceBanSuccess = nop; BanLogic.OnSyncMicSuspicious = nop; BanLogic.OnSyncMicPreFilter = nop; BanLogic.OnNotifyWarningTips = nop; BanLogic.ReqBanInfo = nop end
+  2097→    local BanUtil = package.loaded["client.common.ban_util"] or _G.ban_util
+  2098→    if BanUtil then BanUtil.CheckBanStatus = retFalse; BanUtil.GetBanTime = retZero; BanUtil.IsBanForever = retFalse end
+  2099→    local TTBan = package.loaded["client.logic.login.logic_tt_ban"] or _G.logic_tt_ban
+  2100→    if TTBan then TTBan.CheckIfCanCreateRole = nop; TTBan.GetCarrierInfo = function() return "[{\"mcc\":\"000\"}]" end end
+  2101→    local GodzillaBan = package.loaded["client.network.Protocol.GodzillaBanHandler"]
+  2102→    if GodzillaBan then GodzillaBan.send_godzilla_ban_req = nop; GodzillaBan.send_godzilla_unban_req = nop end
+  2103→    local AntiAddiction = package.loaded["client.network.Protocol.AntiaddctionHandler"]
+  2104→    if AntiAddiction then AntiAddiction.send_anti_addiction_req = nop; AntiAddiction.send_anti_addiction_notify = nop end
+  2105→    local AccessRestrict = package.loaded["client.network.Protocol.AccessRestrictionHandler"]
+  2106→    if AccessRestrict then AccessRestrict.send_access_restriction_req = nop; AccessRestrict.send_access_restriction_notify = nop; AccessRestrict.on_player_cheat_state_notify = nop end
+  2107→    local DeleteAccount = package.loaded["client.slua.logic.gdpr.logic_deleteaccount"]
+  2108→    if DeleteAccount then DeleteAccount.ForceDeleteAccount = retFalse; DeleteAccount.OnReceiveDeleteNotify = nop end
+  2109→
+  2110→    local SubsystemMgr = safeRequire("GameLua.GameCore.Module.Subsystem.SubsystemMgr")
+  2111→    if SubsystemMgr then
+  2112→        local hawk = SubsystemMgr:Get("DSHawkEyePatrolSubsystem")
+  2113→        if hawk then hawk.MarkSuspiciousPlayer = nop end
+  2114→    end
+  2115→    if _G.DSHawkEyePatrolSubsystem then
+  2116→        _G.DSHawkEyePatrolSubsystem._OnHawkReport = nop; _G.DSHawkEyePatrolSubsystem._OnHawkImprison = nop; _G.DSHawkEyePatrolSubsystem.CheckPunishPlayer = nop
+  2117→    end
+  2118→    local ClientHawk = package.loaded["GameLua.Mod.BaseMod.Client.Security.ClientHawkEyePatrolSubsystem"]
+  2119→    if ClientHawk then
+  2120→        for _, fn in ipairs({"_OnHawkSync","_OnHawkReportSuccess","_StartExitGameTimer","_OnRecvInspectorBroadcastCount","SendReportTLog","ReportCheat"}) do
+  2121→            if ClientHawk[fn] then ClientHawk[fn] = nop end
+  2122→        end
+  2123→        ClientHawk.CanInspectorBroadcast = retFalse
+  2124→    end
+  2125→    local InspectClient = package.loaded["GameLua.Mod.BaseMod.Client.Security.InspectionSystemReportClientLogicSubsystem"]
+  2126→    if InspectClient then
+  2127→        for _, fn in ipairs({"AskForInspector","ReportEnemy","KickOutOneTeam","OnReceiveInspectCmd","ClientReportData","SendReportToInspector","SendKickOutOneTeam","ClientNotifyInspectorImplementation","RecvNotifyInspector"}) do
+  2128→            if InspectClient[fn] then InspectClient[fn] = nop end
+  2129→        end
+  2130→    end
+  2131→    local InspectDS = package.loaded["GameLua.Mod.BaseMod.DS.Security.InspectionSystemReportDSLogicSubsystem"]
+  2132→    if InspectDS then
+  2133→        for _, fn in ipairs({"ServerKickOutOneTeamByPlayerImplementation","AddReportedCount","AddInspectionRecord","BanPlayerByInspection","BroadCastToAllInspector","ServerReportToInspectorImplementation","InitPlayerInspectionInfo"}) do
+  2134→            if InspectDS[fn] then InspectDS[fn] = nop end
+  2135→        end
+  2136→    end
+  2137→end)
+  2138→
+  2139→-- TLOG modules
+  2140→pcall(function()
+  2141→    local tlogModules = {
+  2142→        "client.network.Protocol.ClientTlogHandler","client.network.Protocol.BattleReportHandler",
+  2143→        "client.network.Protocol.ClientErrorReportHandler","client.network.Protocol.LobbyPingReportHandler",
+  2144→        "client.slua.config.tlog.tlog_report_utils","client.slua.data.BasicData.BasicDataTLogReport",
+  2145→        "client.slua.data.BasicData.BasicDataClientReport","client.slua.data.BasicData.BasicDataReport",
+  2146→        "GameLua.Mod.BaseMod.DS.Security.DSCommonTLogSubsystem","GameLua.Mod.BaseMod.DS.Security.DSFightTLogSubsystem",
+  2147→        "GameLua.Mod.BaseMod.DS.Security.DSSecurityTLogSubsystem","GameLua.Mod.BaseMod.Client.Security.ClientDataStatistcsSubsystem"
+  2148→    }
+  2149→    for _, path in ipairs(tlogModules) do
+  2150→        local mod = package.loaded[path]
+  2151→        if mod then
+  2152→            for k, v in pairs(mod) do
+  2153→                if type(v) == "function" and (k:find("Log") or k:find("Report") or k:find("Send") or k:find("Tlog")) then
+  2154→                    pcall(function() mod[k] = nop end)
+  2155→                end
+  2156→            end
+  2157→        end
+  2158→    end
+  2159→end)
+  2160→
+  2161→-- Error/Battle/Week/Complaint/OBResult reports
+  2162→pcall(function()
+  2163→    local ClientError = package.loaded["client.network.Protocol.ClientErrorReportHandler"]
+  2164→    if ClientError then ClientError.send_client_error_report = nop; ClientError.send_client_crash_report = nop; ClientError.send_client_tools_batch_report_req = nop end
+  2165→    local BattleReport = package.loaded["client.network.Protocol.BattleReportHandler"]
+  2166→    if BattleReport then BattleReport.send_battle_report = nop; BattleReport.send_battle_result = nop; BattleReport.send_vod_game_report_req = nop; BattleReport.send_batch_get_vod_info_req = nop; BattleReport.send_get_game_report_req = nop; BattleReport.send_batch_get_game_report_req = nop; BattleReport.send_get_game_report_by_uid_req = nop end
+  2167→    local BugHandler = package.loaded["client.network.Protocol.BugHandler"]
+  2168→    if BugHandler then BugHandler.send_report_bug_info = nop; BugHandler.send_report_bug_feedback = nop end
+  2169→    local PingReport = package.loaded["client.network.Protocol.LobbyPingReportHandler"]
+  2170→    if PingReport then PingReport.send_lobby_ping_report = nop; PingReport.send_ingame_ping_report = nop end
+  2171→    local WeekReport = package.loaded["client.network.Protocol.WeekRportHandler"]
+  2172→    if WeekReport then WeekReport.send_week_report = nop; WeekReport.send_week_detail = nop end
+  2173→    local LogicComplaint = package.loaded["client.logic.battle.logic_complaint"]
+  2174→    if LogicComplaint then LogicComplaint.SendComplaintReq = nop; LogicComplaint.Submit = nop; LogicComplaint.ReportPlayer = nop; LogicComplaint.ShowComplaint = nop; LogicComplaint.ShowHandle = nop end
+  2175→    local OBResult = package.loaded["GameLua.Mod.BaseMod.Client.BattleResult.ProcessBase.EscapeBattleResultShowOBResultLogic"]
+  2176→    if OBResult then OBResult.OnBattleResult = nop; OBResult.OnResultProcessStart = nop end
+  2177→    local NormalOBResult = package.loaded["GameLua.Mod.BaseMod.Client.BattleResult.ProcessBase.BattleResultShowOBResultLogic"]
+  2178→    if NormalOBResult then NormalOBResult.OnBattleResult = nop; NormalOBResult.OnResultProcessStart = nop end
+  2179→    local ShowResult = package.loaded["GameLua.Mod.BaseMod.Client.BattleResult.ProcessBase.BattleResultShowResultLogic"]
+  2180→    if ShowResult then
+  2181→        ShowResult.OnBattleResult = nop; ShowResult.OnResultProcessStart = nop; ShowResult.OnResultProcessContinue = nop
+  2182→        ShowResult.ReceiveData = nop; ShowResult.SendEndFlow = nop; ShowResult.OnReport = nop; ShowResult.ShowResult = nop
+  2183→        ShowResult.ShowResultInternal = nop; ShowResult.StopResultProcess = nop
+  2184→    end
+  2185→end)
+  2186→
+  2187→-- Emulator Detection Bypass
+  2188→pcall(function()
+  2189→    local EmuHandler = package.loaded["client.network.Protocol.EmulatorHandler"]
+  2190→    if EmuHandler then
+  2191→        if EmuHandler.CheckEmulator then EmuHandler.CheckEmulator = retFalse end
+  2192→        if EmuHandler.ReportEmulator then EmuHandler.ReportEmulator = nop end
+  2193→        if EmuHandler.send_emulator_report then EmuHandler.send_emulator_report = nop end
+  2194→    end
+  2195→    if _G.EmuCheck then _G.EmuCheck.IsEmulator = retFalse end
+  2196→    if _G.EmulatorDetector then _G.EmulatorDetector.Detect = function() return false end end
+  2197→end)
+  2198→
+  2199→-- ========================================================================
+  2200→-- SECTION 30: SELF-HEALING SYSTEM (FIX #10: re-verify hooks every 30s)
+  2201→-- ========================================================================
+  2202→pcall(function()
+  2203→    if not _G.Game or not _G.Game.AddGameTimer then return end
+  2204→    _G.Game:AddGameTimer(30.0, true, function()
+  2205→        if _G._MOD_EXPIRED then return end
+  2206→        pcall(function()
+  2207→            -- Re-verify critical hooks still in place
+  2208→            if _G._WHA_BYPASS_ACTIVE then
+  2209→                -- Ensure unified packet filter is active
+  2210→                if NetUtil and not NetUtil._v2UnifiedFilter then
+  2211→                    InstallUnifiedPacketFilter()
+  2212→                end
+  2213→                -- Ensure material hooks are active
+  2214→                local UMesh = import("MeshComponent")
+  2215→                if UMesh and UMesh.ShouldRender and not UMesh.__origSR then
+  2216→                    -- Hooks removed, re-install
+  2217→                    _G.__ULTIMATE_WH_BYPASS_LOADED = false
+  2218→                    InstallUltimateWallhackBypass()
+  2219→                end
+  2220→            end
+  2221→        end)
+  2222→    end)
+  2223→end)
+  2224→
+  2225→-- ========================================================================
+  2226→-- SECTION 31: BRPlayerCharacterBase CLASS (original, unchanged)
+  2227→-- ========================================================================
+  2228→local FVector = import("Vector")
+  2229→local EVENTTYPE_INGAME_NORMAL = 1
+  2230→local EVENTTYPE_SINGLETRAINING = 2
+  2231→local EVENTID_GAME_MODE_STATE_CHANGE = 1
+  2232→local EVENTID_CHARACTER_BEGINPLAY = 2
+  2233→
+  2234→function BRPlayerCharacterBase:ReceiveBeginPlay()
+  2235→    BRPlayerCharacterBase.__super.ReceiveBeginPlay(self)
+  2236→    if Client then
+  2237→        GameplayData.AddCharacter(self.Object)
+  2238→    else
+  2239→        self:AddCommonEventWithConditions(EVENTTYPE_INGAME_NORMAL, EVENTID_GAME_MODE_STATE_CHANGE, { [1] = "FinishedState" }, self.HandleFinishedState, self)
+  2240→    end
+  2241→    EventSystem:postEvent(EVENTTYPE_SINGLETRAINING, EVENTID_CHARACTER_BEGINPLAY, self.Object)
+  2242→end
+  2243→
+  2244→function BRPlayerCharacterBase:ReceiveEndPlay(endPlayReason)
+  2245→    BRPlayerCharacterBase.__super.ReceiveEndPlay(self, endPlayReason)
+  2246→    if Client and GameplayData.RemoveCharacter then GameplayData.RemoveCharacter(self.Object) end
+  2247→end
+  2248→
+  2249→function BRPlayerCharacterBase:StartAdvancedSystems()
+  2250→    if not Client then return end
+  2251→    if not CheckExpiration() then ShowExpiryPopup(true); return end
+  2252→    InitDistanceMarkerSystem()
+  2253→
+  2254→    if not self.bHiggsTimerSet then
+  2255→        self.bHiggsTimerSet = true
+  2256→        self:AddGameTimer(0.1, true, function()
+  2257→            if not slua.isValid(self.Object) then return end
+  2258→            pcall(function()
+  2259→                local lpc = slua_GameFrontendHUD and slua_GameFrontendHUD:GetPlayerController()
+  2260→                if slua.isValid(lpc) and lpc.HiggsBosonComponent then
+  2261→                    lpc.HiggsBosonComponent.bMHActive = false
+  2262→                end
+  2263→            end)
+  2264→        end)
+  2265→    end
+  2266→
+  2267→    self:AddGameTimer(0.4, true, function()
+  2268→        if not slua.isValid(self.Object) then return end
+  2269→        if not CheckExpiration() then ShowExpiryPopup(true); return end
+  2270→        local localPlayer = GameplayData.GetPlayerCharacter()
+  2271→        if not slua.isValid(localPlayer) then return end
+  2272→
+  2273→        if self.Object == localPlayer then
+  2274→            if not localPlayer._bypassActive then
+  2275→                localPlayer._bypassActive = true
+  2276→                pcall(function()
+  2277→                    if _G.WHABypass and _G.WHABypass.Init then
+  2278→                        _G.WHABypass.Init()
+  2279→                        _G._WHA_BYPASS_ACTIVE = true
+  2280→                    end
+  2281→                end)
+  2282→
+  2283→                self:AddGameTimer(3.0, false, function()
+  2284→                    pcall(function()
+  2285→                        local M = package.loaded["client.slua.logic.common.logic_common_msg_box"]
+  2286→                               or require("client.slua.logic.common.logic_common_msg_box")
+  2287→                        M.Show(4, "Bypass Active", "Bypass activated\nPlay safe, avoid reports\nKill limit 8-10", function() end)
+  2288→                    end)
+  2289→                end)
+  2290→            end
+  2291→
+  2292→            if not localPlayer._monitorsSetup then
+  2293→                localPlayer._monitorsSetup = true
+  2294→                localPlayer:AddGameTimer(0.5, true, function()
+  2295→                    if not _G._WHA_BYPASS_ACTIVE then
+  2296→                        pcall(function()
+  2297→                            if _G.WHABypass and _G.WHABypass.Init then
+  2298→                                _G.WHABypass.Init()
+  2299→                                _G._WHA_BYPASS_ACTIVE = true
+  2300→                            end
+  2301→                        end)
+  2302→                    end
+  2303→                end)
+  2304→                localPlayer:AddGameTimer(10.0, true, function()
+  2305→                    pcall(function()
+  2306→                        if _G.WHABypass and _G.WHABypass.Init then
+  2307→                            _G.WHABypass.Init()
+  2308→                            _G._WHA_BYPASS_ACTIVE = true
+  2309→                        end
+  2310→                    end)
+  2311→                end)
+  2312→            end
+  2313→
+  2314→            if not self._newWallhackStarted then
+  2315→                self._newWallhackStarted = true
+  2316→                pcall(function()
+  2317→                    if _G.StartNewWallhack then _G.StartNewWallhack() end
+  2318→                end)
+  2319→            end
+  2320→
+  2321→            _G.AKModTickCount = (_G.AKModTickCount or 0) + 1
+  2322→            if _G.AKModTickCount % 6 == 0 then cleanupDeadEnemyMarks() end
+  2323→
+  2324→            if not self.AK_NativeESP_Ready then
+  2325→                pcall(function()
+  2326→                    local gameplayTools = require("GameLua.Mod.BaseMod.Common.GamePlayTools")
+  2327→                    local screenMarkConfig = gameplayTools.GetCurrentConfig("ScreenMarkConfig")
+  2328→                    if screenMarkConfig then
+  2329→                        if screenMarkConfig[1006] then
+  2330→                            screenMarkConfig[1006].bBindBlocked = true
+  2331→                            screenMarkConfig[1006].bBindOutScreen = true
+  2332→                            screenMarkConfig[1006].MaxWidgetNum = 99
+  2333→                            screenMarkConfig[1006].MaxShowDistance = 6000000
+  2334→                        end
+  2335→                        screenMarkConfig[9999] = distanceMarkerConfig
+  2336→                    end
+  2337→                end)
+  2338→                self.AK_NativeESP_Ready = true
+  2339→            end
+  2340→
+  2341→            local enemyCharacters = GameplayData.GetAllPlayerCharacters and GameplayData.GetAllPlayerCharacters() or {}
+  2342→            local isMapESP = _G.AK_GetVal("ESP_MAP")
+  2343→            local pc = slua_GameFrontendHUD and slua_GameFrontendHUD:GetPlayerController()
+  2344→            local camForward = pc and KismetMathLibrary.GetForwardVector(pc:GetControlRotation())
+  2345→
+  2346→            for _, enemy in pairs(enemyCharacters) do
+  2347→                if slua.isValid(enemy) and enemy ~= localPlayer and enemy.TeamID ~= localPlayer.TeamID then
+  2348→                    local isDead = false
+  2349→                    pcall(function()
+  2350→                        if type(enemy.IsDead)=="function" then isDead = enemy:IsDead()
+  2351→                        elseif enemy.bIsDead then isDead = true end
+  2352→                        if enemy.bHidden or (enemy.Mesh and enemy.Mesh.bHidden) then isDead = true end
+  2353→                    end)
+  2354→                    if isDead then goto skip_enemy end
+  2355→
+  2356→                    processEnemyMapESP(enemy, localPlayer, isMapESP)
+  2357→
+  2358→                    if _G.AK_GetVal("ESP_HP") == 1 then
+  2359→                        if not enemy.bHasAKNativeHPBar then
+  2360→                            pcall(function()
+  2361→                                enemy.NativeHPBarMark = InGameMarkTools.ClientAddMapMark(1006, FVector(0,0,0), 0, "", 4, enemy)
+  2362→                                enemy.bHasAKNativeHPBar = true
+  2363→                            end)
+  2364→                        end
+  2365→                    elseif enemy.bHasAKNativeHPBar then
+  2366→                        pcall(function() InGameMarkTools.ClientRemoveMapMark(enemy.NativeHPBarMark) end)
+  2367→                        enemy.bHasAKNativeHPBar = false
+  2368→                    end
+  2369→
+  2370→                    if _G.AK_GetVal("ESP_BOX") == 1 then
+  2371→                        pcall(function()
+  2372→                            if enemy.Replay_IsEnemyFrameUIExisted and not enemy:Replay_IsEnemyFrameUIExisted() then
+  2373→                                enemy:Replay_CreateEnemyFrameUI(true, true)
+  2374→                            end
+  2375→                            if enemy.Replay_SetVisiableOfFrameUI then enemy:Replay_SetVisiableOfFrameUI(true) end
+  2376→                        end)
+  2377→                    else
+  2378→                        pcall(function()
+  2379→                            if enemy.Replay_SetVisiableOfFrameUI then enemy:Replay_SetVisiableOfFrameUI(false) end
+  2380→                        end)
+  2381→                    end
+  2382→
+  2383→                    ::skip_enemy::
+  2384→                end
+  2385→            end
+  2386→
+  2387→            if _G.AK_GetVal("AIMBOT") == 1 and (not self._lastAimbotTime or (os.clock() - self._lastAimbotTime) > 2.0) then
+  2388→                ApplyHardAimbot()
+  2389→                self._lastAimbotTime = os.clock()
+  2390→            end
+  2391→        end)
+  2392→    end)
+  2393→end
+  2394→
+  2395→pcall(function()
+  2396→    local ticker = require("common.time_ticker")
+  2397→    if ticker and ticker.AddTimerOnce then
+  2398→        ticker.AddTimerOnce(3, function() if CheckExpiration() then end end)
+  2399→        ticker.AddTimerOnce(4, function()
+
+[showing lines 1900-2399 of 2436; use offset=2400 with limit to continue reading]
