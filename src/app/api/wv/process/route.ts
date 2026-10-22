@@ -4,7 +4,29 @@ import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
 
+// Auto-ensure database schema on first call (for serverless environments)
+let dbInitialized = false;
+async function ensureDb() {
+  if (dbInitialized) return;
+  try {
+    await db.videoJob.count();
+    dbInitialized = true;
+  } catch {
+    try {
+      const { execSync } = await import("child_process");
+      execSync("npx prisma db push --accept-data-loss", {
+        env: { ...process.env },
+        timeout: 30000,
+      });
+      dbInitialized = true;
+    } catch {
+      dbInitialized = true;
+    }
+  }
+}
+
 async function startProcessing(mpdUrl: string, licenseUrl: string) {
+  await ensureDb();
   const license = licenseUrl || "https://cwip-shaka-proxy.appspot.com/no_auth";
 
   // Create job in database
