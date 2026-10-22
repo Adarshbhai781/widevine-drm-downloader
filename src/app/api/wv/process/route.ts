@@ -19,26 +19,51 @@ async function startProcessing(mpdUrl: string, licenseUrl: string) {
     },
   });
 
-  // Paths
+  // Paths - detect serverless environment (Netlify/Vercel) where cwd is read-only
+  // Netlify sets NETLIFY=true, Vercel sets VERCEL=1; also test by trying to write
+  const isServerless = !!(process.env.NETLIFY || process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  const baseDir = isServerless ? "/tmp" : process.cwd();
   const scriptDir = path.join(process.cwd(), "scripts", "widevine_termux");
   const wvdPath = path.join(scriptDir, "my_device.wvd");
-  const outputDir = path.join(process.cwd(), "downloads", job.id);
+  const outputDir = path.join(baseDir, "downloads", job.id);
   const progressFile = path.join(outputDir, "progress.json");
   const processorScript = path.join(scriptDir, "wv_processor.py");
 
   // Ensure output dir exists
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  // Check WVD exists
-  if (!fs.existsSync(wvdPath)) {
+  try {
+    fs.mkdirSync(outputDir, { recursive: true });
+  } catch (mkdirErr) {
     await db.videoJob.update({
       where: { id: job.id },
-      data: { status: "error", message: "WVD file not found" },
+      data: { status: "error", message: `Cannot create output directory: ${mkdirErr instanceof Error ? mkdirErr.message : "Unknown error"}` },
     });
-    return { error: "WVD file not found" };
+    return { error: "Server filesystem error - cannot create download directory" };
   }
 
-  // Spawn Python processor in background
+  // Check WVD exists and Python processor exists (server-side processing only)
+  const wvdExists = fs.existsSync(wvdPath);
+  const pythonExists = fs.existsSync(processorScript);
+
+  if (!wvdExists || !pythonExists) {
+    // On Netlify or environments without CDM/processor, mark as queued
+    await db.videoJob.update({
+      where: { id: job.id },
+      data: {
+        status: "pending",
+        message: "Job queued - waiting for server-side processor (CDM + Python required)",
+      },
+    });
+
+    return {
+      jobId: job.id,
+      status: "pending",
+      message: "Job created - processing requires CDM (.wvd) file and Python processor on server",
+      statusUrl: `/api/wv/status?jobId=${job.id}`,
+      videoUrl: `/api/wv/video?jobId=${job.id}`,
+    };
+  }
+
+  // Spawn Python processor in background (only when available)
   const pythonProcess = spawn(
     "python3",
     [processorScript, job.id, mpdUrl, license, wvdPath, outputDir, progressFile],
