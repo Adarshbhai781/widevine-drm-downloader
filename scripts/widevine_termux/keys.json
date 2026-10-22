@@ -1,0 +1,44 @@
+{
+  "mpd_url": "https://storage.googleapis.com/wvmedia/cenc/h264/tears/tears.mpd",
+  "pssh": "AAAARHBzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAACQIARIBNRoNd2lkZXZpbmVfdGVzdCIKMjAxNV90ZWFycyoCU0Q=",
+  "license_url": "https://cwip-shaka-proxy.appspot.com/no_auth",
+  "content_keys": {
+    "094816179a9b5ef8948d7a5a12f03d72": "4cfba8efa622e060860816cf4839e74b",
+    "cb54fd438d5a515f97b5fc5c736ad29e": "1c2bab8e7d29238db3d7d2aafb499024",
+    "e955ba0e58d65475b4f5f2995060e2d4": "361f60ff04b497f5bad07e85b9f509df",
+    "1958fde827d95e83821ee6f245f9bebf": "3d5fc513da703db5c3a55d5e8d69ab74",
+    "f9ca650a33cf566ba9b6bb74f8929991": "07d61d68e586a54a8608b60493019d2d"
+  },
+  "all_keys": [
+    {
+      "kid": "00000000000000000000000000000000",
+      "key": "2589edb565f78bb4e8e1ad93bba769a96cb1fbf4cea9e71c0e2e2db21413fcfc75c8dcf264a33fbfdc0a3e55a43a69dad893f9ba635fdab01cbd29f7b5eac7bb",
+      "type": "SIGNING"
+    },
+    {
+      "kid": "094816179a9b5ef8948d7a5a12f03d72",
+      "key": "4cfba8efa622e060860816cf4839e74b",
+      "type": "CONTENT"
+    },
+    {
+      "kid": "cb54fd438d5a515f97b5fc5c736ad29e",
+      "key": "1c2bab8e7d29238db3d7d2aafb499024",
+      "type": "CONTENT"
+    },
+    {
+      "kid": "e955ba0e58d65475b4f5f2995060e2d4",
+      "key": "361f60ff04b497f5bad07e85b9f509df",
+      "type": "CONTENT"
+    },
+    {
+      "kid": "1958fde827d95e83821ee6f245f9bebf",
+      "key": "3d5fc513da703db5c3a55d5e8d69ab74",
+      "type": "CONTENT"
+    },
+    {
+      "kid": "f9ca650a33cf566ba9b6bb74f8929991",
+      "key": "07d61d68e586a54a8608b60493019d2d",
+      "type": "CONTENT"
+    }
+  ]
+}
