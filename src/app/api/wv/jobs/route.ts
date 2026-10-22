@@ -1,34 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-
-// Auto-ensure database schema on first call (for serverless environments)
-let dbInitialized = false;
-async function ensureDb() {
-  if (dbInitialized) return;
-  try {
-    // Try a simple query first
-    await db.videoJob.count();
-    dbInitialized = true;
-  } catch {
-    // Database doesn't exist yet, create it
-    try {
-      const { execSync } = await import("child_process");
-      execSync("npx prisma db push --accept-data-loss", {
-        env: { ...process.env },
-        timeout: 30000,
-      });
-      dbInitialized = true;
-    } catch (pushErr) {
-      console.error("Failed to initialize database:", pushErr);
-      // Even if push fails, mark as initialized to avoid retrying on every request
-      dbInitialized = true;
-    }
-  }
-}
+import { db, ensureDatabase } from "@/lib/db";
 
 export async function GET() {
   try {
-    await ensureDb();
+    await ensureDatabase();
     const jobs = await db.videoJob.findMany({
       orderBy: { createdAt: "desc" },
       take: 20,

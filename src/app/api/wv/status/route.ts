@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, ensureDatabase } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   try {
+    await ensureDatabase();
     const jobId = req.nextUrl.searchParams.get("jobId");
 
     if (!jobId) {
