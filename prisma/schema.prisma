@@ -43,3 +43,19 @@ model Settings {
   key   String @unique
   value String
 }
+
+model VideoJob {
+  id          String   @id @default(cuid())
+  mpdUrl      String
+  licenseUrl  String   @default("https://cwip-shaka-proxy.appspot.com/no_auth")
+  status      String   @default("pending") // pending | processing | decrypting | merging | done | error
+  progress    Int      @default(0)
+  message     String?
+  videoPath   String?
+  videoSize   Int?
+  duration    Float?
+  resolution  String?
+  keysJson    String?   // JSON string of extracted keys
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
