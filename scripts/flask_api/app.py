@@ -20,7 +20,7 @@ Endpoints:
     GET /health  (health check)
 """
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file, Response
 from pywidevine.cdm import Cdm
 from pywidevine.device import Device
 from pywidevine.pssh import PSSH
@@ -36,6 +36,11 @@ import uuid as _uuid
 import subprocess
 import shutil
 import traceback
+import threading
+import time
+import math
+import urllib.request
+import urllib.error
 from datetime import datetime
 
 app = Flask(__name__)
@@ -692,6 +697,550 @@ def stream():
         }), 500
 
 
+# ─── /play Endpoint (Download + Decrypt + Serve Video) ────────────────────
+
+# Storage for play jobs
+PLAY_JOBS = {}
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def http_download(url, headers=None):
+    """Download a URL with proper headers."""
+    hdrs = {"User-Agent": USER_AGENT, "Accept": "*/*"}
+    if headers:
+        hdrs.update(headers)
+    hdrs.setdefault("Referer", url.rsplit("/", 1)[0] + "/")
+    resp = requests.get(url, headers=hdrs, timeout=60)
+    resp.raise_for_status()
+    return resp.content
+
+
+def download_and_decrypt_video(job_id, mpd_url, license_url, quality="best"):
+    """Background task: Download encrypted DASH segments + decrypt + merge.
+    
+    Steps:
+    1. Get Widevine keys
+    2. Parse MPD for segment URLs
+    3. Download init + media segments (video + audio)
+    4. Decrypt with mp4decrypt
+    5. Merge with ffmpeg
+    6. Save final video
+    """
+    job = PLAY_JOBS[job_id]
+    job_dir = os.path.join(OUTPUT_DIR, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    
+    try:
+        # Step 1: Get Widevine keys
+        job["status"] = "getting_keys"
+        job["progress"] = 5
+        job["message"] = "Getting Widevine decryption keys..."
+        
+        drm_result = generate_drm_keys(mpd_url, license_url)
+        content_keys = drm_result["content_keys"]
+        job["pssh"] = drm_result["pssh"]
+        job["keys"] = [f"{kid}:{key}" for kid, key in content_keys.items()]
+        
+        # Step 2: Fetch and parse MPD
+        job["status"] = "parsing_mpd"
+        job["progress"] = 10
+        job["message"] = "Parsing MPD manifest..."
+        
+        mpd_resp = requests.get(mpd_url, headers={"User-Agent": USER_AGENT}, timeout=30)
+        mpd_resp.raise_for_status()
+        mpd_xml = mpd_resp.text
+        
+        # Parse MPD - extract base URL and segment templates
+        # Base URL = directory containing the MPD file
+        base_url = mpd_url.rsplit('/', 1)[0] + '/'
+        
+        # Parse period duration
+        period_dur = None
+        m = re.search(r'mediaPresentationDuration="PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+\.?\d*)S)?"', mpd_xml)
+        if m:
+            period_dur = int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + float(m.group(3) or 0)
+        
+        # Parse AdaptationSets
+        adaptations = []
+        for as_match in re.finditer(r'<AdaptationSet[^>]*>(.*?)</AdaptationSet>', mpd_xml, re.DOTALL):
+            as_block = as_match.group(0)
+            content_type = "audio" if ('contentType="audio"' in as_block or 'mimeType="audio' in as_block) else "video"
+            
+            kid_match = re.search(r'default_KID="([0-9a-f-]+)"', as_block, re.IGNORECASE)
+            default_kid = kid_match.group(1).replace("-", "") if kid_match else None
+            
+            # SegmentTemplate
+            seg_tmpl = re.search(r'<SegmentTemplate[^>]*>', as_block, re.DOTALL)
+            init_tmpl = media_tmpl = None
+            timescale = 1
+            seg_duration = None
+            start_num = 1
+            
+            if seg_tmpl:
+                tag = seg_tmpl.group(0)
+                m2 = re.search(r'initialization="([^"]*)"', tag)
+                if m2: init_tmpl = m2.group(1)
+                m2 = re.search(r'media="([^"]*)"', tag)
+                if m2: media_tmpl = m2.group(1)
+                m2 = re.search(r'timescale="(\d+)"', tag)
+                if m2: timescale = int(m2.group(1))
+                m2 = re.search(r'duration="(\d+)"', tag)
+                if m2: seg_duration = int(m2.group(1))
+                m2 = re.search(r'startNumber="(\d+)"', tag)
+                if m2: start_num = int(m2.group(1))
+            
+            num_segments = 0
+            if seg_duration and period_dur:
+                num_segments = math.ceil(period_dur / (seg_duration / timescale))
+            
+            # Representations
+            for rep_match in re.finditer(r'<Representation[^>]*id="([^"]*)"[^>]*>', as_block, re.DOTALL):
+                rep_id = rep_match.group(1)
+                rep_tag = rep_match.group(0)
+                bw = re.search(r'bandwidth="(\d+)"', rep_tag)
+                w = re.search(r' width="(\d+)"', rep_tag)
+                h = re.search(r' height="(\d+)"', rep_tag)
+                
+                # BaseURL per representation
+                rep_block = rep_match.group(0)
+                # Get the full representation block (from <Representation to </Representation>)
+                rep_full_match = re.search(r'<Representation[^>]*id="' + re.escape(rep_id) + r'\"[^>]*>(.*?)</Representation>', as_block, re.DOTALL)
+                rep_content = rep_full_match.group(1) if rep_full_match else ""
+                rep_bu_match = re.search(r'<BaseURL>(.*?)</BaseURL>', rep_content)
+                rep_base_url = rep_bu_match.group(1).strip() if rep_bu_match else None
+                
+                adaptations.append({
+                    "type": content_type, "rep_id": rep_id,
+                    "bandwidth": int(bw.group(1)) if bw else 0,
+                    "width": int(w.group(1)) if w else 0,
+                    "height": int(h.group(1)) if h else 0,
+                    "default_kid": default_kid,
+                    "init_template": init_tmpl, "media_template": media_tmpl,
+                    "timescale": timescale, "segment_duration": seg_duration,
+                    "start_number": start_num, "num_segments": num_segments,
+                    "base_url": rep_base_url,
+                })
+        
+        # Select best video and audio
+        video_reps = [a for a in adaptations if a['type'] == 'video']
+        audio_reps = [a for a in adaptations if a['type'] == 'audio']
+        
+        if quality == "worst":
+            best_video = min(video_reps, key=lambda x: x.get('height', 99999)) if video_reps else None
+        else:
+            best_video = max(video_reps, key=lambda x: x.get('height', 0)) if video_reps else None
+        best_audio = max(audio_reps, key=lambda x: x.get('bandwidth', 0)) if audio_reps else None
+        
+        if not best_video:
+            raise Exception("No video representation found in MPD")
+        
+        # Step 3: Download segments
+        downloaded = {}
+        
+        for rep_type, rep in [("video", best_video), ("audio", best_audio)]:
+            if rep is None:
+                continue
+            
+            # Skip if no segment templates (uses SegmentBase/SegmentList instead)
+            if not rep.get('init_template') or not rep.get('media_template'):
+                # Try direct BaseURL download for SegmentBase content
+                rep_bu = rep.get('base_url')
+                if rep_bu:
+                    if not rep_bu.startswith('http'):
+                        direct_url = base_url + rep_bu
+                    else:
+                        direct_url = rep_bu
+                    job["status"] = f"downloading_{rep_type}"
+                    job["message"] = f"Downloading {rep_type} ({direct_url[:60]}...)"
+                    job["progress"] = 25 if rep_type == "video" else 60
+                    
+                    enc_data = http_download(direct_url)
+                    enc_path = os.path.join(job_dir, f"{rep_type}_encrypted.mp4")
+                    with open(enc_path, 'wb') as f:
+                        f.write(enc_data)
+                    
+                    default_kid = rep.get('default_kid') or ''
+                    if default_kid:
+                        default_kid = default_kid.replace('-', '')
+                    
+                    key_hex = kid_hex = None
+                    if default_kid and default_kid in content_keys:
+                        key_hex, kid_hex = content_keys[default_kid], default_kid
+                    else:
+                        for kid, kv in content_keys.items():
+                            key_hex, kid_hex = kv, kid
+                            break
+                    
+                    downloaded[rep_type] = {"enc_path": enc_path, "key_hex": key_hex, "kid_hex": kid_hex}
+                continue
+            
+            job["status"] = f"downloading_{rep_type}"
+            job["message"] = f"Downloading {rep_type} segments ({rep.get('height', 'audio')})..."
+            
+            def resolve(tmpl, rid, num, bw):
+                return tmpl.replace('$RepresentationID$', rid) \
+                           .replace('$Bandwidth$', str(bw)) \
+                           .replace('$Number$', str(num)) \
+                           .replace('$Time$', str(num))
+            
+            # Download init
+            init_url = base_url + resolve(rep['init_template'], rep['rep_id'], 0, rep['bandwidth'])
+            init_data = http_download(init_url)
+            
+            # Download media segments
+            segments = []
+            seg_num = rep['start_number']
+            max_seg = rep['num_segments'] + 5 if rep['num_segments'] > 0 else 300
+            progress_base = 20 if rep_type == "video" else 60
+            progress_range = 35 if rep_type == "video" else 15
+            
+            while seg_num < rep['start_number'] + max_seg:
+                seg_url = base_url + resolve(rep['media_template'], rep['rep_id'], seg_num, rep['bandwidth'])
+                try:
+                    seg_data = http_download(seg_url)
+                except requests.exceptions.HTTPError as e:
+                    if e.response.status_code in (404, 410):
+                        break
+                    raise
+                
+                if len(seg_data) < 10:
+                    break
+                
+                segments.append(seg_data)
+                done = seg_num - rep['start_number'] + 1
+                total = rep['num_segments'] if rep['num_segments'] > 0 else done + 1
+                pct = min(100, done / total * 100)
+                job["progress"] = int(progress_base + progress_range * pct / 100)
+                job["message"] = f"Downloading {rep_type}: segment {done}/{total}"
+                seg_num += 1
+                
+                if rep['num_segments'] > 0 and done >= rep['num_segments']:
+                    break
+            
+            # Save encrypted file
+            enc_path = os.path.join(job_dir, f"{rep_type}_encrypted.mp4")
+            with open(enc_path, 'wb') as f:
+                f.write(init_data)
+                for seg in segments:
+                    f.write(seg)
+            
+            # Find matching key
+            default_kid = rep.get('default_kid') or ''
+            if default_kid:
+                default_kid = default_kid.replace('-', '')
+            
+            key_hex = kid_hex = None
+            if default_kid and default_kid in content_keys:
+                key_hex, kid_hex = content_keys[default_kid], default_kid
+            else:
+                for kid, kv in content_keys.items():
+                    key_hex, kid_hex = kv, kid
+                    break
+            
+            downloaded[rep_type] = {"enc_path": enc_path, "key_hex": key_hex, "kid_hex": kid_hex}
+        
+        # Step 4: Decrypt
+        job["status"] = "decrypting"
+        job["progress"] = 80
+        job["message"] = "Decrypting video..."
+        
+        # Find mp4decrypt binary
+        mp4decrypt_bin = shutil.which("mp4decrypt") or "/usr/local/bin/mp4decrypt"
+        
+        # Build key args for ALL keys
+        key_args = []
+        for kid_hex, key_hex in content_keys.items():
+            key_args.extend(["--key", f"{kid_hex}:{key_hex}"])
+        
+        dec_files = {}
+        for rep_type, info in downloaded.items():
+            enc_path = info['enc_path']
+            dec_path = enc_path.replace('_encrypted.mp4', '_decrypted.mp4')
+            
+            cmd = [mp4decrypt_bin] + key_args + [enc_path, dec_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode != 0:
+                # Try Python fallback
+                py_mp4dec = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "widevine_termux", "mp4decrypt.py")
+                if os.path.exists(py_mp4dec):
+                    cmd = [sys.executable, py_mp4dec] + key_args + [enc_path, dec_path]
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                if result.returncode != 0:
+                    raise Exception(f"mp4decrypt failed for {rep_type}: {result.stderr[:200]}")
+            
+            dec_files[rep_type] = dec_path
+            job["message"] = f"Decrypted {rep_type}"
+        
+        # Step 5: Merge
+        job["status"] = "merging"
+        job["progress"] = 90
+        job["message"] = "Merging video + audio..."
+        
+        final_path = os.path.join(job_dir, "final_video.mp4")
+        
+        if 'video' in dec_files and 'audio' in dec_files:
+            result = subprocess.run([
+                "ffmpeg", "-i", dec_files['video'], "-i", dec_files['audio'],
+                "-c:v", "copy", "-c:a", "copy", "-y", final_path
+            ], capture_output=True, timeout=120)
+            if result.returncode != 0:
+                # Fallback: try with audio re-encode
+                result = subprocess.run([
+                    "ffmpeg", "-i", dec_files['video'], "-i", dec_files['audio'],
+                    "-c:v", "copy", "-c:a", "aac", "-y", final_path
+                ], capture_output=True, timeout=120)
+            if result.returncode != 0:
+                shutil.copy2(dec_files['video'], final_path)
+        elif 'video' in dec_files:
+            shutil.copy2(dec_files['video'], final_path)
+        
+        # Done!
+        video_size = os.path.getsize(final_path) if os.path.exists(final_path) else 0
+        duration = period_dur
+        resolution = f"{best_video['width']}x{best_video['height']}" if best_video else None
+        
+        job["status"] = "done"
+        job["progress"] = 100
+        job["message"] = "Video ready!"
+        job["video_path"] = final_path
+        job["video_size"] = video_size
+        job["video_size_mb"] = round(video_size / (1024*1024), 2)
+        job["duration"] = duration
+        job["resolution"] = resolution
+        job["title"] = os.path.basename(mpd_url).replace('.mpd', '')
+        
+    except Exception as e:
+        job["status"] = "error"
+        job["progress"] = 0
+        job["message"] = str(e)
+        job["traceback"] = traceback.format_exc()
+
+
+@app.route('/play', methods=['GET'])
+def play():
+    """Play endpoint - Download + Decrypt DRM video and serve for browser playback.
+    
+    GET /play?fetchstreamurl=<MPD_URL>&lic=<LICENSE_URL>&quality=<best|worst>
+    
+    This starts the download+decrypt process in the background and returns
+    an HTML page with a video player. The player polls /play/status/<job_id>
+    and when ready, plays the video from /play/video/<job_id>.
+    
+    You can also use pre-configured names:
+    GET /play?fetchstreamurl=tears
+    """
+    stream_url = request.args.get('fetchstreamurl') or request.args.get('mpd')
+    license_url = request.args.get('lic') or request.args.get('license') or None
+    quality = request.args.get('quality', 'best')
+    
+    if not stream_url:
+        return jsonify({
+            "error": "fetchstreamurl is required",
+            "usage": "GET /play?fetchstreamurl=<MPD_URL>&lic=<LICENSE_URL>",
+            "preconfigured": list(KNOWN_MPDS.keys()),
+        }), 400
+    
+    # Check if it's a pre-configured name
+    if stream_url in KNOWN_MPDS:
+        preset = KNOWN_MPDS[stream_url]
+        mpd_url = preset["mpd"]
+        license_url = license_url or preset["lic"]
+    else:
+        mpd_url = stream_url
+        license_url = license_url or DEFAULT_LICENSE_URL
+    
+    # Create job
+    job_id = _uuid.uuid4().hex[:12]
+    PLAY_JOBS[job_id] = {
+        "id": job_id,
+        "status": "starting",
+        "progress": 0,
+        "message": "Starting...",
+        "mpd_url": mpd_url,
+        "license_url": license_url,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    
+    # Start background processing
+    thread = threading.Thread(
+        target=download_and_decrypt_video,
+        args=(job_id, mpd_url, license_url, quality),
+        daemon=True
+    )
+    thread.start()
+    
+    # Return HTML page with video player
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Widevine DRM Player</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ background: #0a0a0a; color: #fff; font-family: -apple-system, sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }}
+  .container {{ max-width: 960px; width: 100%; padding: 20px; }}
+  h1 {{ font-size: 24px; margin-bottom: 8px; color: #e50914; }}
+  .meta {{ color: #888; font-size: 14px; margin-bottom: 20px; }}
+  .player-box {{ background: #000; border-radius: 12px; overflow: hidden; margin-bottom: 20px; aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center; position: relative; }}
+  video {{ width: 100%; height: 100%; object-fit: contain; }}
+  .progress-box {{ background: #1a1a1a; border-radius: 8px; padding: 20px; margin-bottom: 20px; }}
+  .progress-bar {{ background: #333; border-radius: 4px; height: 8px; overflow: hidden; margin: 10px 0; }}
+  .progress-fill {{ background: #e50914; height: 100%; width: 0$; transition: width 0.3s; border-radius: 4px; }}
+  .status {{ font-size: 14px; color: #aaa; }}
+  .keys-box {{ background: #1a1a1a; border-radius: 8px; padding: 16px; margin-top: 20px; font-size: 12px; }}
+  .keys-box h3 {{ color: #e50914; margin-bottom: 8px; }}
+  .key {{ color: #0f0; font-family: monospace; margin: 4px 0; word-break: break-all; }}
+  .download-btn {{ background: #e50914; color: #fff; border: none; padding: 12px 24px; border-radius: 8px; font-size: 16px; cursor: pointer; margin-top: 12px; display: none; text-decoration: none; }}
+  .download-btn:hover {{ background: #b2070f; }}
+  .spinner {{ width: 60px; height: 60px; border: 4px solid #333; border-top-color: #e50914; border-radius: 50%; animation: spin 1s linear infinite; }}
+  @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+  .loading-text {{ color: #aaa; margin-top: 12px; font-size: 16px; }}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Widevine DRM Player</h1>
+  <div class="meta" id="meta">MPD: {mpd_url[:80]}...</div>
+  
+  <div class="player-box" id="playerBox">
+    <div id="loadingArea">
+      <div class="spinner"></div>
+      <div class="loading-text" id="loadingText">Processing video...</div>
+    </div>
+    <video id="videoPlayer" controls style="display:none"></video>
+  </div>
+  
+  <div class="progress-box" id="progressBox">
+    <div class="status" id="statusText">Starting...</div>
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="status" id="progressText">0%</div>
+  </div>
+  
+  <a class="download-btn" id="downloadBtn" download>Download Video</a>
+  
+  <div class="keys-box" id="keysBox" style="display:none">
+    <h3>Decryption Keys</h3>
+    <div id="keysList"></div>
+  </div>
+</div>
+
+<script>
+const jobId = "{job_id}";
+let pollInterval;
+
+function pollStatus() {{
+  fetch('/play/status/' + jobId)
+    .then(r => r.json())
+    .then(data => {{
+      document.getElementById('statusText').textContent = data.message || data.status;
+      document.getElementById('progressFill').style.width = data.progress + '%';
+      document.getElementById('progressText').textContent = data.progress + '%';
+      document.getElementById('loadingText').textContent = data.message || data.status;
+      
+      if (data.keys && data.keys.length > 0) {{
+        document.getElementById('keysBox').style.display = 'block';
+        document.getElementById('keysList').innerHTML = data.keys.map(k => '<div class="key">' + k + '</div>').join('');
+      }}
+      
+      if (data.status === 'done') {{
+        clearInterval(pollInterval);
+        document.getElementById('loadingArea').style.display = 'none';
+        const video = document.getElementById('videoPlayer');
+        video.style.display = 'block';
+        video.src = '/play/video/' + jobId;
+        video.play().catch(() => {{}});
+        
+        if (data.resolution) document.getElementById('meta').textContent = data.title + ' | ' + data.resolution + ' | ' + data.video_size_mb + ' MB';
+        
+        const btn = document.getElementById('downloadBtn');
+        btn.style.display = 'inline-block';
+        btn.href = '/play/video/' + jobId;
+        btn.textContent = 'Download (' + data.video_size_mb + ' MB)';
+      }}
+      
+      if (data.status === 'error') {{
+        clearInterval(pollInterval);
+        document.getElementById('loadingText').textContent = 'Error: ' + data.message;
+      }}
+    }})
+    .catch(err => console.error(err));
+}}
+
+pollInterval = setInterval(pollStatus, 1500);
+pollStatus();
+</script>
+</body>
+</html>"""
+    return Response(html, mimetype='text/html')
+
+
+@app.route('/play/status/<job_id>', methods=['GET'])
+def play_status(job_id):
+    """Get the status of a play job."""
+    if job_id not in PLAY_JOBS:
+        return jsonify({"error": "Job not found"}), 404
+    
+    job = PLAY_JOBS[job_id]
+    result = {
+        "id": job["id"],
+        "status": job["status"],
+        "progress": job.get("progress", 0),
+        "message": job.get("message", ""),
+    }
+    
+    if job.get("keys"):
+        result["keys"] = job["keys"]
+    if job.get("video_size_mb"):
+        result["video_size_mb"] = job["video_size_mb"]
+    if job.get("resolution"):
+        result["resolution"] = job["resolution"]
+    if job.get("title"):
+        result["title"] = job["title"]
+    if job.get("duration"):
+        result["duration"] = job["duration"]
+    
+    return jsonify(result)
+
+
+@app.route('/play/video/<job_id>', methods=['GET'])
+def play_video(job_id):
+    """Serve the decrypted video file for playback."""
+    if job_id not in PLAY_JOBS:
+        return jsonify({"error": "Job not found"}), 404
+    
+    job = PLAY_JOBS[job_id]
+    
+    if job["status"] != "done":
+        return jsonify({"error": "Video not ready yet", "status": job["status"], "progress": job.get("progress", 0)}), 202
+    
+    video_path = job.get("video_path")
+    if not video_path or not os.path.exists(video_path):
+        return jsonify({"error": "Video file not found"}), 404
+    
+    return send_file(video_path, mimetype='video/mp4', as_attachment=False)
+
+
+@app.route('/play/download/<job_id>', methods=['GET'])
+def play_download(job_id):
+    """Download the decrypted video file."""
+    if job_id not in PLAY_JOBS:
+        return jsonify({"error": "Job not found"}), 404
+    
+    job = PLAY_JOBS[job_id]
+    
+    if job["status"] != "done":
+        return jsonify({"error": "Video not ready yet", "status": job["status"]}), 202
+    
+    video_path = job.get("video_path")
+    if not video_path or not os.path.exists(video_path):
+        return jsonify({"error": "Video file not found"}), 404
+    
+    title = job.get("title", "video") + ".mp4"
+    return send_file(video_path, mimetype='video/mp4', as_attachment=True, download_name=title)
+
+
 # ─── Main ────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     print("=" * 60)
@@ -706,11 +1255,10 @@ if __name__ == '__main__':
     print(f"  Default License: {DEFAULT_LICENSE_URL}")
     print()
     print("  Endpoints:")
-    print("    GET  /stream?fetchstreamurl=<MPD_URL>&lic=<LICENSE_URL>  <-- MAIN")
+    print("    GET  /play?fetchstreamurl=<MPD_URL>  <-- PLAY VIDEO IN BROWSER!")
+    print("    GET  /stream?fetchstreamurl=<MPD_URL>  <-- Get keys + URLs")
     print("    GET  /api?mpd=<MPD_URL>&lic=<LICENSE_URL>")
-    print("    POST /api  {mpd, lic, headers}")
     print("    GET  /keys?mpd=<MPD_URL>&lic=<LICENSE_URL>")
-    print("    GET  /download?mpd=<MPD_URL>&lic=<LICENSE_URL>")
     print("    GET  /pssh?mpd=<MPD_URL>")
     print("    GET  /health")
     print()
