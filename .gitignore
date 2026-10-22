@@ -53,6 +53,8 @@ mini-services/
 test
 prompt
 tool-results/
+test-results/
+worklog.md
 
 # Downloads & generated files
 /downloads/
