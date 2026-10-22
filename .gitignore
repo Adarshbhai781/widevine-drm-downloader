@@ -96,3 +96,4 @@ progress.json
 
 # Local Netlify folder
 .netlify
+scripts/netlify-session.json
