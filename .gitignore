@@ -1,5 +1,3 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # dependencies
 node_modules
 /.pnp
@@ -32,10 +30,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
-
 
 # typescript
 *.tsbuildinfo
@@ -46,12 +44,15 @@ local-*
 *.log
 dev.log
 dev.out.log
+server.log
+
+# Skills & dev directories
+/skills/
+.zscripts/
+mini-services/
 test
 prompt
-
-server.log
-# Skills directory
-/skills/
+tool-results/
 
 # Downloads & generated files
 /downloads/
@@ -62,11 +63,31 @@ server.log
 *.pak
 *.mp4
 *.zip
+*.m4a
+*.m4v
 
 # Database
 db/
 *.db
+prisma/migrations/
 
-# Dev & build artifacts
-.zscripts/
-mini-services/
+# CDM device files - SENSITIVE, NEVER COMMIT
+*.wvd
+/scripts/widevine_termux/my_device.wvd
+
+# Bento4 downloaded binary
+/scripts/widevine_termux/mp4decrypt
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Progress files
+progress.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

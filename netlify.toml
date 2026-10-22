@@ -1,5 +1,5 @@
 [build]
-  command = "bun run build"
+  command = "bun install && bun run db:generate && bun run build"
   publish = ".next"
 
 [[plugins]]
@@ -8,3 +8,9 @@
 [build.environment]
   NODE_VERSION = "20"
   BUN_VERSION = "latest"
+
+# API routes need server-side rendering
+[[redirects]]
+  from = "/api/*"
+  to = "/api/:splat"
+  status = 200
