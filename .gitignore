@@ -52,3 +52,21 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# Downloads & generated files
+/downloads/
+/scripts/widevine_termux/downloads/
+/scripts/auto_result/
+/scripts/auto_edit/
+/scripts/mod_templates/
+*.pak
+*.mp4
+*.zip
+
+# Database
+db/
+*.db
+
+# Dev & build artifacts
+.zscripts/
+mini-services/
