@@ -475,6 +475,223 @@ def pssh_endpoint():
         return jsonify({"error": str(e)}), 500
 
 
+# ─── /stream Endpoint ─────────────────────────────────────────────────────
+
+# Pre-configured MPD URLs that are known to work
+KNOWN_MPDS = {
+    "tears": {
+        "mpd": "https://storage.googleapis.com/wvmedia/cenc/h264/tears/tears.mpd",
+        "lic": "https://cwip-shaka-proxy.appspot.com/no_auth",
+        "name": "Tears of Steel (HD, H264 CENC)",
+    },
+    "tears_uhd": {
+        "mpd": "https://storage.googleapis.com/wvmedia/cenc/h264/tears/tears_uhd.mpd",
+        "lic": "https://cwip-shaka-proxy.appspot.com/no_auth",
+        "name": "Tears of Steel (4K UHD, H264 CENC)",
+    },
+    "tears_vp9": {
+        "mpd": "https://storage.googleapis.com/wvmedia/cenc/vp9/tears/tears.mpd",
+        "lic": "https://cwip-shaka-proxy.appspot.com/no_auth",
+        "name": "Tears of Steel (HD, VP9 WebM CENC)",
+    },
+    "tears_cbcs": {
+        "mpd": "https://storage.googleapis.com/wvmedia/cbcs/h264/tears/tears_aes_cbcs.mpd",
+        "lic": "https://cwip-shaka-proxy.appspot.com/no_auth",
+        "name": "Tears of Steel (HD, H264 CBCS)",
+    },
+    "bitmovin": {
+        "mpd": "https://cdn.bitmovin.com/content/assets/art-of-motion_drm/mpds/11331.mpd",
+        "lic": "https://cwip-shaka-proxy.appspot.com/no_auth",
+        "name": "Bitmovin Art of Motion (HD, CENC)",
+    },
+}
+
+
+def build_ytdlp_download_cmd(mpd_url, keys, quality="best"):
+    """Build a complete yt-dlp download command with decryption keys."""
+    ytdlp_bin = os.path.expanduser("~/.local/bin/yt-dlp")
+    if not os.path.exists(ytdlp_bin):
+        ytdlp_bin = shutil.which("yt-dlp") or "yt-dlp"
+    
+    cmd = [ytdlp_bin]
+    
+    # Add decryption keys
+    for kid, key in keys.items():
+        cmd.extend(["--decryption-key", f"{kid}:{key}"])
+    
+    # Quality selection
+    if quality == "best":
+        cmd.extend(["-f", "bestvideo+bestaudio"])
+    elif quality == "worst":
+        cmd.extend(["-f", "worstvideo+worstaudio"])
+    
+    cmd.extend(["-o", "%(title)s.%(ext)s", mpd_url])
+    return " ".join(cmd)
+
+
+def build_mp4decrypt_cmd(keys):
+    """Build mp4decrypt key arguments."""
+    args = []
+    for kid, key in keys.items():
+        args.extend(["--key", f"{kid}:{key}"])
+    return " ".join(args)
+
+
+@app.route('/stream', methods=['GET', 'POST'])
+def stream():
+    """Stream endpoint - Get playable/downloadable URL from MPD.
+    
+    This is the ONE endpoint you need. Just pass your MPD URL and get back:
+    - Direct video URLs for each quality
+    - Ready-to-use yt-dlp download command (with keys)
+    - mp4decrypt keys for manual decryption
+    - Video title, duration, formats info
+    
+    GET  /stream?fetchstreamurl=<MPD_URL>&lic=<LICENSE_URL>&quality=<best|worst>
+    POST /stream  body: {"fetchstreamurl": "<MPD_URL>", "lic": "<LICENSE_URL>"}
+    
+    You can also use pre-configured names:
+    GET  /stream?fetchstreamurl=tears    (uses pre-configured Tears of Steel)
+    GET  /stream?fetchstreamurl=bitmovin (uses pre-configured Bitmovin)
+    
+    Parameters:
+        fetchstreamurl: MPD URL or pre-configured name (required)
+        lic: License server URL (optional, defaults to Shaka proxy)
+        quality: best / worst (optional, default: best)
+    """
+    # Parse parameters
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        stream_url = data.get('fetchstreamurl') or data.get('mpd')
+        license_url = data.get('lic') or data.get('license') or None
+        quality = data.get('quality', 'best')
+    else:
+        stream_url = request.args.get('fetchstreamurl') or request.args.get('mpd')
+        license_url = request.args.get('lic') or request.args.get('license') or None
+        quality = request.args.get('quality', 'best')
+    
+    if not stream_url:
+        return jsonify({
+            "error": "fetchstreamurl is required",
+            "usage": "GET /stream?fetchstreamurl=<MPD_URL>&lic=<LICENSE_URL>",
+            "preconfigured": list(KNOWN_MPDS.keys()),
+            "example": "/stream?fetchstreamurl=tears",
+        }), 400
+    
+    # Check if it's a pre-configured name
+    if stream_url in KNOWN_MPDS:
+        preset = KNOWN_MPDS[stream_url]
+        mpd_url = preset["mpd"]
+        license_url = license_url or preset["lic"]
+        preset_name = preset["name"]
+    else:
+        mpd_url = stream_url
+        license_url = license_url or DEFAULT_LICENSE_URL
+        preset_name = None
+    
+    try:
+        # Step 1: Get Widevine keys
+        drm_result = generate_drm_keys(mpd_url, license_url)
+        content_keys = drm_result["content_keys"]
+        key_strings = drm_result["key_strings"]
+        
+        # Step 2: Get video info via yt-dlp
+        ytdlp_result = get_ytdlp_info(mpd_url, content_keys)
+        
+        # Step 3: Build download commands
+        ytdlp_download_cmd = build_ytdlp_download_cmd(mpd_url, content_keys, quality)
+        mp4decrypt_keys_str = build_mp4decrypt_cmd(content_keys)
+        
+        # Step 4: Extract best direct URLs
+        best_video_url = None
+        best_audio_url = None
+        video_formats = []
+        
+        if ytdlp_result.get("success"):
+            for fmt in ytdlp_result.get("formats", []):
+                vc = fmt.get("vcodec", "none")
+                ac = fmt.get("acodec", "none")
+                is_video = vc != "none"
+                is_audio = ac != "none" and not is_video
+                
+                entry = {
+                    "format_id": fmt.get("format_id"),
+                    "resolution": fmt.get("resolution", "audio"),
+                    "ext": fmt.get("ext"),
+                    "url": fmt.get("url"),
+                    "vcodec": vc,
+                    "acodec": ac,
+                    "bandwidth": fmt.get("tbr"),
+                }
+                video_formats.append(entry)
+                
+                # Track best video (highest resolution)
+                if is_video and not best_video_url:
+                    best_video_url = fmt.get("url")
+                elif is_video:
+                    # Compare resolutions - pick the last (highest) one
+                    best_video_url = fmt.get("url")
+                
+                if is_audio:
+                    best_audio_url = fmt.get("url")
+        
+        # Step 5: Build complete response
+        response = {
+            "status": "ready",
+            "message": "Stream ready - use download_command to download, or use direct URLs with mp4decrypt",
+            "title": ytdlp_result.get("title") if ytdlp_result.get("success") else None,
+            "duration": ytdlp_result.get("duration") if ytdlp_result.get("success") else None,
+            "mpd_url": mpd_url,
+            "license_url": license_url,
+            "pssh": drm_result["pssh"],
+            
+            # Download command - JUST COPY PASTE THIS!
+            "download_command": ytdlp_download_cmd,
+            
+            # mp4decrypt keys - use if you download raw segments
+            "mp4decrypt_keys": mp4decrypt_keys_str,
+            "mp4decrypt_command": f"mp4decrypt {mp4decrypt_keys_str} encrypted.mp4 decrypted.mp4",
+            
+            # Direct URLs for each quality
+            "best_video_url": best_video_url,
+            "best_audio_url": best_audio_url,
+            "formats": video_formats,
+            
+            # DRM Keys
+            "keys": key_strings,
+            "content_keys": content_keys,
+            
+            # How to use
+            "how_to_download": {
+                "method_1_ytdlp": "Copy the download_command and run it in terminal",
+                "method_2_manual": "1. Download encrypted segments from best_video_url\n"
+                                  "2. Run: mp4decrypt " + mp4decrypt_keys_str + " encrypted.mp4 decrypted.mp4\n"
+                                  "3. Play decrypted.mp4",
+                "method_3_ffmpeg": "ffmpeg -decryption_key KID:KEY -i encrypted.mp4 -c copy decrypted.mp4",
+            },
+        }
+        
+        if preset_name:
+            response["preset_name"] = preset_name
+        
+        return jsonify(response)
+    
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e), "type": "wvd_not_found"}), 500
+    except ValueError as e:
+        return jsonify({"error": str(e), "type": "pssh_error"}), 400
+    except requests.exceptions.HTTPError as e:
+        return jsonify({"error": f"HTTP error: {e}", "type": "http_error"}), 502
+    except requests.exceptions.Timeout:
+        return jsonify({"error": "Request timed out", "type": "timeout"}), 504
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "type": "internal_error",
+            "traceback": traceback.format_exc(),
+        }), 500
+
+
 # ─── Main ────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     print("=" * 60)
@@ -489,12 +706,19 @@ if __name__ == '__main__':
     print(f"  Default License: {DEFAULT_LICENSE_URL}")
     print()
     print("  Endpoints:")
+    print("    GET  /stream?fetchstreamurl=<MPD_URL>&lic=<LICENSE_URL>  <-- MAIN")
     print("    GET  /api?mpd=<MPD_URL>&lic=<LICENSE_URL>")
     print("    POST /api  {mpd, lic, headers}")
     print("    GET  /keys?mpd=<MPD_URL>&lic=<LICENSE_URL>")
     print("    GET  /download?mpd=<MPD_URL>&lic=<LICENSE_URL>")
     print("    GET  /pssh?mpd=<MPD_URL>")
     print("    GET  /health")
+    print()
+    print("  Pre-configured streams:")
+    print("    /stream?fetchstreamurl=tears       (Tears of Steel HD)")
+    print("    /stream?fetchstreamurl=tears_uhd   (Tears of Steel 4K)")
+    print("    /stream?fetchstreamurl=tears_vp9   (VP9 WebM)")
+    print("    /stream?fetchstreamurl=bitmovin    (Art of Motion)")
     print()
     print("  Starting server on http://0.0.0.0:5000")
     print("=" * 60)
