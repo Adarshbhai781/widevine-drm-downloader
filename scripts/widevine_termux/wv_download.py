@@ -278,12 +278,15 @@ def find_mp4decrypt(script_dir):
     
     return None
 
-def decrypt_file(enc_path, dec_path, key_hex, kid_hex, mp4decrypt_info):
-    """Decrypt an encrypted MP4 file."""
-    key_arg = f"{kid_hex}:{key_hex}"
+def decrypt_file(enc_path, dec_path, all_keys, mp4decrypt_info):
+    """Decrypt an encrypted MP4 file. all_keys = {kid_hex: key_hex}"""
+    # Build --key arguments for ALL keys (mp4decrypt matches KID internally)
+    key_args = []
+    for kid_hex, key_hex in all_keys.items():
+        key_args.extend(["--key", f"{kid_hex}:{key_hex}"])
     
     if mp4decrypt_info[0] == "binary":
-        cmd = [mp4decrypt_info[1], "--key", key_arg, enc_path, dec_path]
+        cmd = [mp4decrypt_info[1]] + key_args + [enc_path, dec_path]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             log("err", f"mp4decrypt failed: {result.stderr[:200]}")
@@ -291,7 +294,7 @@ def decrypt_file(enc_path, dec_path, key_hex, kid_hex, mp4decrypt_info):
         return True
     
     elif mp4decrypt_info[0] == "python":
-        cmd = [sys.executable, mp4decrypt_info[1], "--key", key_arg, enc_path, dec_path]
+        cmd = [sys.executable, mp4decrypt_info[1]] + key_args + [enc_path, dec_path]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             log("err", f"Python mp4decrypt failed: {result.stderr[:200]}")
@@ -416,6 +419,9 @@ def main():
             "kid_hex": kid_hex,
         }
     
+    # Store all content keys for mp4decrypt (needs ALL keys for proper KID matching)
+    all_content_keys = content_keys
+    
     # ─── STEP 5: Decrypt ───────────────────────────────────────────────
     header("STEP 5/5: Decrypt & Merge")
     
@@ -439,9 +445,9 @@ def main():
         enc_path = info['enc_path']
         dec_path = enc_path.replace('_encrypted.mp4', '_decrypted.mp4')
         
-        log("info", f"Decrypting {rep_type} ({info['kid_hex']}:{info['key_hex']})")
+        log("info", f"Decrypting {rep_type} (using {len(all_content_keys)} keys)")
         
-        if decrypt_file(enc_path, dec_path, info['key_hex'], info['kid_hex'], mp4dec_info):
+        if decrypt_file(enc_path, dec_path, all_content_keys, mp4dec_info):
             log("ok", f"Decrypted: {dec_path} ({os.path.getsize(dec_path)} bytes)")
             dec_files[rep_type] = dec_path
         else:

@@ -98,6 +98,48 @@ pip install --quiet pywidevine cryptography pycryptodome 2>/dev/null || {
 }
 ok "Python packages installed"
 
+# Install mp4decrypt (Bento4 binary or Python fallback)
+if command -v mp4decrypt &>/dev/null; then
+    ok "mp4decrypt: $(which mp4decrypt)"
+elif [ -f "${SCRIPT_DIR}/tools/mp4decrypt" ]; then
+    ok "mp4decrypt: ${SCRIPT_DIR}/tools/mp4decrypt"
+else
+    # Try to download Bento4 mp4decrypt binary
+    info "Downloading Bento4 mp4decrypt..."
+    mkdir -p "${SCRIPT_DIR}/tools"
+    ARCH=$(uname -m)
+    if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+        # Termux on ARM - use Python fallback
+        warn "ARM architecture - using Python mp4decrypt fallback"
+        pip3 install --quiet cryptography 2>/dev/null
+    elif [ "$ARCH" = "x86_64" ]; then
+        # x86_64 - download Bento4 binary
+        BENTO4_URL="https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-641.x86_64-unknown-linux.zip"
+        TMP_ZIP="/tmp/bento4_$$.zip"
+        if command -v wget &>/dev/null; then
+            wget -q "$BENTO4_URL" -O "$TMP_ZIP" 2>/dev/null
+        else
+            curl -sL "$BENTO4_URL" -o "$TMP_ZIP" 2>/dev/null
+        fi
+        if [ -f "$TMP_ZIP" ] && [ $(stat -c%s "$TMP_ZIP" 2>/dev/null || echo 0) -gt 1000000 ]; then
+            unzip -j "$TMP_ZIP" "*/bin/mp4decrypt" -d "${SCRIPT_DIR}/tools/" 2>/dev/null
+            chmod +x "${SCRIPT_DIR}/tools/mp4decrypt" 2>/dev/null
+            ok "mp4decrypt installed to tools/"
+        else
+            warn "Failed to download Bento4, using Python fallback"
+        fi
+        rm -f "$TMP_ZIP"
+    fi
+    
+    if [ -f "${SCRIPT_DIR}/tools/mp4decrypt" ]; then
+        ok "mp4decrypt binary ready"
+    elif [ -f "${SCRIPT_DIR}/mp4decrypt.py" ]; then
+        ok "Python mp4decrypt.py fallback available"
+    else
+        err "No mp4decrypt available! Decryption will fail."
+    fi
+fi
+
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 1: Check CDM File
 # ═══════════════════════════════════════════════════════════════════════════

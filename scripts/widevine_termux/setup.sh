@@ -20,7 +20,32 @@ pkg install -y python python-pip ffmpeg
 # Install Python packages
 echo -e "\n  ${B}[*]${N} Installing Python packages..."
 pip3 install --upgrade pip
-pip3 install pywidevine yt-dlp
+pip3 install pywidevine cryptography pycryptodome yt-dlp
+
+# Install Bento4 mp4decrypt
+ARCH=$(uname -m)
+if [ "$ARCH" = "x86_64" ]; then
+    echo -e "\n  ${B}[*]${N} Installing Bento4 mp4decrypt..."
+    BENTO4_URL="https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-641.x86_64-unknown-linux.zip"
+    TMP_ZIP="/tmp/bento4_setup.zip"
+    if command -v wget &>/dev/null; then
+        wget -q "$BENTO4_URL" -O "$TMP_ZIP"
+    else
+        curl -sL "$BENTO4_URL" -o "$TMP_ZIP"
+    fi
+    TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools"
+    mkdir -p "$TOOLS_DIR"
+    unzip -j "$TMP_ZIP" "*/bin/mp4decrypt" -d "$TOOLS_DIR/" 2>/dev/null
+    chmod +x "$TOOLS_DIR/mp4decrypt" 2>/dev/null
+    # Also install system-wide if possible
+    if [ -w /usr/local/bin ]; then
+        cp "$TOOLS_DIR/mp4decrypt" /usr/local/bin/ 2>/dev/null
+    fi
+    rm -f "$TMP_ZIP"
+    echo -e "  ${G}[+]${N} mp4decrypt installed"
+else
+    echo -e "\n  ${Y}[!]${N} ARM device - Python mp4decrypt.py will be used as fallback"
+fi
 
 # Verify
 echo -e "\n  ${G}[+]${N} Setup complete!\n"
