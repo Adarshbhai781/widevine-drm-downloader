@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       error: "processurl is required",
       usage: "/api/wv?processurl=<MPD_URL or preset>",
-      presets: ["bitmovin", "tears", "tears_uhd", "tears_vp9", "tears_cbcs"],
+      presets: ["bitmovin", "tears", "tears_vp9"],
     }, { status: 400 });
   }
 
@@ -70,9 +70,13 @@ export async function GET(req: NextRequest) {
     const data = JSON.parse(result);
 
     if (data.status === "success" && data.session_id) {
-      const base = `${url.protocol}//${url.host}`;
-      // play_url = this same endpoint with ?play=session_id → serves HTML player
-      data.play_url = `${base}/api/wv?play=${data.session_id}`;
+      // Build play_url using request origin (works behind proxies)
+      const fwdHost = req.headers.get("x-forwarded-host");
+      const fwdProto = req.headers.get("x-forwarded-proto");
+      const proto = (fwdProto || url.protocol || "http").replace(/:$/, "");
+      const host = fwdHost || url.host;
+      const origin = `${proto}://${host}`;
+      data.play_url = `${origin}/api/wv?play=${data.session_id}`;
       sessions[data.session_id] = {
         mpd_url: data.mpd_url,
         clearkeys: data.clearkeys,
@@ -113,8 +117,12 @@ export async function POST(req: NextRequest) {
     const url = new URL(req.url);
 
     if (data.status === "success" && data.session_id) {
-      const base = `${url.protocol}//${url.host}`;
-      data.play_url = `${base}/api/wv?play=${data.session_id}`;
+      const fwdHost = req.headers.get("x-forwarded-host");
+      const fwdProto = req.headers.get("x-forwarded-proto");
+      const proto = (fwdProto || url.protocol || "http").replace(/:$/, "");
+      const host = fwdHost || url.host;
+      const origin = `${proto}://${host}`;
+      data.play_url = `${origin}/api/wv?play=${data.session_id}`;
       sessions[data.session_id] = {
         mpd_url: data.mpd_url,
         clearkeys: data.clearkeys,
