@@ -56,16 +56,8 @@ PRESETS = {
         "mpd": "https://storage.googleapis.com/wvmedia/cenc/h264/tears/tears.mpd",
         "lic": "https://cwip-shaka-proxy.appspot.com/no_auth",
     },
-    "tears_uhd": {
-        "mpd": "https://storage.googleapis.com/wvmedia/cenc/h264/tears_uhd/tears_uhd.mpd",
-        "lic": "https://cwip-shaka-proxy.appspot.com/no_auth",
-    },
     "tears_vp9": {
         "mpd": "https://storage.googleapis.com/wvmedia/cenc/vp9/tears/tears.mpd",
-        "lic": "https://cwip-shaka-proxy.appspot.com/no_auth",
-    },
-    "tears_cbcs": {
-        "mpd": "https://storage.googleapis.com/wvmedia/cbcs/h264/tears/tears.mpd",
         "lic": "https://cwip-shaka-proxy.appspot.com/no_auth",
     },
 }
