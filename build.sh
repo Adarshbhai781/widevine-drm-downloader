@@ -5,8 +5,8 @@ set -euo pipefail
 echo "=== Installing Python dependencies ==="
 pip3 install --quiet -r requirements.txt
 
-echo "=== Installing Node dependencies ==="
-npm install
+echo "=== Installing Node dependencies (including devDependencies) ==="
+npm install --include=dev
 
 echo "=== Building Next.js ==="
 npm run build
