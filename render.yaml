@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: widevine-drm-downloader
+    runtime: node
+    plan: free
+    buildCommand: bash build.sh
+    startCommand: node .next/standalone/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PYTHON3_PATH
+        value: python3
+      - key: PORT
+        fromService:
+          type: web
+          name: widevine-drm-downloader
+          property: port

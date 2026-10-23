@@ -3,7 +3,8 @@ import { execFileSync } from "child_process";
 import path from "path";
 
 const WV_SCRIPT = path.join(process.cwd(), "scripts", "wv_process.py");
-const PYTHON3 = "/home/z/.venv/bin/python3";
+// Dynamic Python path: use venv locally, system python on Render/production
+const PYTHON3 = process.env.PYTHON3_PATH || "/home/z/.venv/bin/python3";
 
 // ─── In-memory session store for player ─────────────────────────────
 declare global {
