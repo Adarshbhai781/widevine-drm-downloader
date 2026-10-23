@@ -1,5 +1,0 @@
-flask>=3.0
-pywidevine>=1.0
-requests>=2.28
-beautifulsoup4>=4.12
-yt-dlp>=2024.0
