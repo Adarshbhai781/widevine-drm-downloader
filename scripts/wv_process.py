@@ -60,6 +60,29 @@ PRESETS = {
         "mpd": "https://storage.googleapis.com/wvmedia/cenc/vp9/tears/tears.mpd",
         "lic": "https://cwip-shaka-proxy.appspot.com/no_auth",
     },
+    # Axinom Cmaf CBCS vector — license.axprod.net is DEAD, keys inlined
+    # Source: github.com/Axinom/public-test-vectors → ContentKeys/Axinom-Encoding-Cmaf-H264-protected-SingleKey.txt
+    "axinom_cbcs": {
+        "mpd": "https://media.axprod.net/TestVectors/Cmaf/protected_1080p_h264_cbcs/manifest.mpd",
+        "lic": None,
+        "inline_keys": [
+            {"kid": "302f80dd411e4886bca5bb1f8018a024", "key": "15b2aaf906ebec6309d40f91289127b8"}
+        ],
+    },
+    "axinom_cenc": {
+        "mpd": "https://media.axprod.net/TestVectors/Cmaf/protected_1080p_h264_cbcs/manifest.mpd",
+        "lic": None,
+        "inline_keys": [
+            {"kid": "302f80dd411e4886bca5bb1f8018a024", "key": "15b2aaf906ebec6309d40f91289127b8"}
+        ],
+    },
+}
+
+# Inline-keys registry: MPD URL prefix → keys (license server not required)
+INLINE_KEY_MAP = {
+    "media.axprod.net/testvectors/cmaf/protected_1080p_h264_cbcs": [
+        {"kid": "302f80dd411e4886bca5bb1f8018a024", "key": "15b2aaf906ebec6309d40f91289127b8"}
+    ],
 }
 
 DEFAULT_LIC = "https://cwip-shaka-proxy.appspot.com/no_auth"
@@ -166,16 +189,28 @@ def process(args: dict) -> dict:
 
     # Resolve preset
     preset = PRESETS.get(processurl.lower())
+    inline_keys = None
     if preset:
         mpd_url = preset["mpd"]
         if not license_url:
-            license_url = preset.get("lic", DEFAULT_LIC)
+            license_url = preset.get("lic") or DEFAULT_LIC
         pssh_input = pssh_input or preset.get("pssh", "")
+        inline_keys = preset.get("inline_keys")
     else:
         mpd_url = processurl
 
-    # Step 1: Get PSSH
-    if not pssh_input:
+    # Inline-keys auto-match by URL prefix (no license server needed)
+    if not inline_keys:
+        low = mpd_url.lower()
+        for prefix, k in INLINE_KEY_MAP.items():
+            if low.startswith("https://" + prefix) or prefix in low:
+                inline_keys = k
+                break
+
+    # Step 1: Get PSSH (skip fetch if inline keys already known)
+    if inline_keys:
+        pssh_input = pssh_input or ""  # PSSH not strictly needed when keys are known
+    elif not pssh_input:
         mpd_xml = fetch_mpd(mpd_url)
         if mpd_xml:
             pssh_list = extract_pssh(mpd_xml)
@@ -188,14 +223,17 @@ def process(args: dict) -> dict:
             if not license_url:
                 license_url = bp["lic"]
 
-    if not pssh_input:
+    if not pssh_input and not inline_keys:
         return {"status": "error", "message": "No PSSH found. Provide pssh parameter directly."}
 
-    if not license_url:
+    if not license_url and not inline_keys:
         license_url = DEFAULT_LIC
 
-    # Step 2: Get DRM keys
-    content_keys = get_keys(pssh_input, license_url)
+    # Step 2: Get DRM keys (inline bypass or license server)
+    if inline_keys:
+        content_keys = inline_keys
+    else:
+        content_keys = get_keys(pssh_input, license_url)
     if not content_keys:
         return {"status": "error", "message": "No CONTENT keys from license server.",
                 "pssh": pssh_input, "license_url": license_url}
@@ -203,7 +241,12 @@ def process(args: dict) -> dict:
     # Step 3: Build response
     session_id = hashlib.md5(f"{mpd_url}{time.time()}".encode()).hexdigest()[:12]
     keys_hex = [f"{k['kid']}:{k['key']}" for k in content_keys]
-    clearkeys = {k["kid"]: k["key"] for k in content_keys}
+
+    def _b64url(hexstr: str) -> str:
+        return base64.urlsafe_b64encode(bytes.fromhex(hexstr)).rstrip(b"=").decode()
+
+    # Shaka Player clearKeys needs base64url-encoded kid & key (NOT hex)
+    clearkeys = {_b64url(k["kid"]): _b64url(k["key"]) for k in content_keys}
 
     # yt-dlp command
     key_args = " ".join([f"--decryption-key {kh}" for kh in keys_hex])
